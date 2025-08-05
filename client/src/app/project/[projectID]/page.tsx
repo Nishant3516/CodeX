@@ -1,5 +1,5 @@
 "use client";
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import ResizableSidebar from "@/components/ResizableSidebar";
 import FileExplorer from "@/components/FileExplorer";
 import CodeEditor from "@/components/CodeEditor";
@@ -9,10 +9,15 @@ import Tabs from "@/components/Tabs";
 import SplitPane from "@/components/SplitPane";
 import ConsoleOutput from "@/components/ConsoleOutput";
 import ValidationOutput from "@/components/ValidationOutput";
+import CheckpointFloatingUI from "@/components/CheckpointFloatingUI";
 import SettingsModal, { SettingsState, defaultSettings } from "@/components/SettingsModal";
 import { validateHTML, validateCSS, validateJS, generateLinkSuggestions } from "@/utils/validators";
 import { prettifyCode } from "@/utils/prettifier";
+import { TestRunner } from "@/utils/testRunner";
 import { useKeyboardShortcuts } from "@/hooks/useKeyboardShortcuts";
+import { useProjectStore } from "@/store/projectStore";
+import { ProjectData, CheckpointProgress } from "@/types/project";
+import todoProjectData from "@/data/todoProject.json";
 
 const defaultFiles = ["index.html", "styles.css", "script.js"];
 const defaultContents: Record<string, string> = {
@@ -45,9 +50,6 @@ const getLanguage = (filename: string) => {
 
 export default function ProjectPage({ params }: Params) {
   const [projectID, setProjectID] = useState<string>("");
-  const [files, setFiles] = useState<string[]>(defaultFiles);
-  const [contents, setContents] = useState<Record<string, string>>(defaultContents);
-  const [activeFile, setActiveFile] = useState<string>(defaultFiles[0]);
   const [srcDoc, setSrcDoc] = useState<string>("");
   const [consoleLogs, setConsoleLogs] = useState<string[]>([]);
   const [consoleErrors, setConsoleErrors] = useState<string[]>([]);
@@ -57,6 +59,29 @@ export default function ProjectPage({ params }: Params) {
   const [showValidation, setShowValidation] = useState<boolean>(false);
   const [settings, setSettings] = useState<SettingsState>(defaultSettings);
   const [showSettings, setShowSettings] = useState<boolean>(false);
+  const [isIframeReady, setIsIframeReady] = useState<boolean>(false);
+  
+  // Zustand store
+  const {
+    projectData,
+    currentCheckpoint,
+    checkpointProgress,
+    files,
+    contents,
+    activeFile,
+    isTestingInProgress,
+    initializeProject,
+    navigateToCheckpoint,
+    canNavigateToCheckpoint,
+    updateFileContent,
+    setActiveFile,
+    addFile,
+    setIsTestingInProgress,
+    updateCheckpointProgress
+  } = useProjectStore();
+  
+  const previewIframeRef = useRef<HTMLIFrameElement>(null);
+  const debounceTimerRef = useRef<NodeJS.Timeout | null>(null);
 
   useEffect(() => {
     params.then(({ projectID }) => setProjectID(projectID));
@@ -66,14 +91,21 @@ export default function ProjectPage({ params }: Params) {
 
   const handleCreate = (filename: string) => {
     if (!files.includes(filename)) {
-      setFiles([...files, filename]);
-      setContents({ ...contents, [filename]: "" });
+      addFile(filename);
       setActiveFile(filename);
     }
   };
 
   const handleContentChange = (value: string) => {
-    setContents((prev) => ({ ...prev, [activeFile]: value }));
+    // Clear previous debounce timer
+    if (debounceTimerRef.current) {
+      clearTimeout(debounceTimerRef.current);
+    }
+    
+    // Debounce the store update
+    debounceTimerRef.current = setTimeout(() => {
+      updateFileContent(activeFile, value);
+    }, 300); // 300ms debounce for content changes
     
     // Run validation on content change only if auto-validation is enabled
     if (settings.autoValidation) {
@@ -172,6 +204,35 @@ export default function ProjectPage({ params }: Params) {
         return false;
       };
       
+      // Notify parent when iframe is ready
+      window.addEventListener('load', function() {
+        window.parent.postMessage({type: 'iframe-ready'}, '*');
+      });
+      
+      // Listen for test script injection requests
+      window.addEventListener('message', function(event) {
+        if (event.data.type === 'inject-test-script') {
+          try {
+            const script = document.createElement('script');
+            script.textContent = event.data.script;
+            document.head.appendChild(script);
+            
+            // Clean up the script after execution
+            setTimeout(() => {
+              if (script.parentNode) {
+                script.parentNode.removeChild(script);
+              }
+            }, 500);
+          } catch (error) {
+            window.parent.postMessage({
+              type: 'test-result',
+              testId: event.data.testId,
+              result: { passed: false, message: 'Script injection failed: ' + error.message }
+            }, '*');
+          }
+        }
+      });
+      
       ${js}
     `;
     
@@ -187,6 +248,7 @@ export default function ProjectPage({ params }: Params) {
 </html>`;
     
     setSrcDoc(fullHTML);
+    setIsIframeReady(false); // Reset iframe ready state
     setConsoleLogs(['🚀 Code executed successfully']);
   };
 
@@ -199,7 +261,7 @@ export default function ProjectPage({ params }: Params) {
     const language = getLanguage(activeFile);
     const currentContent = contents[activeFile] || "";
     const prettified = await prettifyCode(currentContent, language);
-    setContents(prev => ({ ...prev, [activeFile]: prettified }));
+    updateFileContent(activeFile, prettified);
     setConsoleLogs(prev => [...prev, `✨ Code formatted for ${activeFile}`]);
   };
 
@@ -217,6 +279,81 @@ export default function ProjectPage({ params }: Params) {
     setSettings(newSettings);
     localStorage.setItem('editorSettings', JSON.stringify(newSettings));
   };
+
+  // Checkpoint management functions
+  const handleCheckpointChange = (checkpointId: number): boolean => {
+    if (!projectData || !canNavigateToCheckpoint(checkpointId)) {
+      return false;
+    }
+    
+    navigateToCheckpoint(checkpointId);
+    setConsoleLogs(prev => [...prev, `📍 Switched to checkpoint: ${projectData.checkpoints.find(cp => cp.id === checkpointId)?.title}`]);
+    return true;
+  };
+
+  const handleRunTests = async () => {
+    if (!projectData) {
+      setConsoleErrors(['❌ Cannot run tests: project data not available']);
+      return;
+    }
+    
+    const currentCheckpointData = projectData.checkpoints.find(cp => cp.id === currentCheckpoint);
+    if (!currentCheckpointData || !previewIframeRef.current) {
+      setConsoleErrors(['❌ Cannot run tests: checkpoint or preview not available']);
+      return;
+    }
+
+    setConsoleLogs(prev => [...prev, '🧪 Running tests...']);
+    setIsTestingInProgress(true);
+    
+    const testRunner = new TestRunner(previewIframeRef.current);
+    const testResults = await testRunner.runAllTests(currentCheckpointData.tests);
+    
+    // Update checkpoint progress
+    const newProgress: CheckpointProgress = {
+      checkpointId: currentCheckpoint,
+      completed: Object.values(testResults).every(result => result.passed),
+      testsResults: testResults
+    };
+    
+    updateCheckpointProgress(newProgress);
+    
+    // Log test results
+    const passedTests = Object.values(testResults).filter(result => result.passed).length;
+    const totalTests = Object.keys(testResults).length;
+    
+    setConsoleLogs(prev => [
+      ...prev,
+      `✅ Tests completed: ${passedTests}/${totalTests} passed`,
+      ...Object.entries(testResults).map(([testId, result]) => 
+        `${result.passed ? '✅' : '❌'} Test ${testId}: ${result.message}`
+      )
+    ]);
+    
+    if (newProgress.completed) {
+      setConsoleLogs(prev => [...prev, `🎉 Checkpoint "${currentCheckpointData.title}" completed!`]);
+    }
+    
+    setIsTestingInProgress(false);
+    
+    setShowConsole(true);
+  };
+
+  // Initialize checkpoint progress on component mount
+  useEffect(() => {
+    initializeProject(todoProjectData);
+  }, [initializeProject]);
+
+  // Update preview whenever files change (debounced)
+  useEffect(() => {
+    const debounceTimer = setTimeout(() => {
+      if (files.length > 0 && contents) {
+        handleRun();
+      }
+    }, 500); // 500ms debounce delay
+
+    return () => clearTimeout(debounceTimer);
+  }, [files, contents]);
 
   // Load settings from localStorage on mount
   useEffect(() => {
@@ -248,6 +385,35 @@ export default function ProjectPage({ params }: Params) {
       } else if (event.data.type === 'console-error') {
         setConsoleErrors(prev => [...prev, event.data.data]);
         setShowConsole(true);
+      } else if (event.data.type === 'iframe-ready') {
+        setIsIframeReady(true);
+        setConsoleLogs(prev => [...prev, '✅ Preview iframe is ready']);
+      } else if (event.data.type === 'run-test') {
+        // Handle test execution in iframe
+        const iframe = previewIframeRef.current;
+        if (iframe && iframe.contentWindow && iframe.contentDocument) {
+          try {
+            // Create a script element and append it to the iframe's document
+            const script = iframe.contentDocument.createElement('script');
+            script.textContent = event.data.testCode;
+            iframe.contentDocument.head.appendChild(script);
+            // Remove the script after execution
+            setTimeout(() => {
+              if (script.parentNode) {
+                script.parentNode.removeChild(script);
+              }
+            }, 100);
+          } catch (error) {
+            window.postMessage({
+              type: 'test-result',
+              testId: event.data.testId,
+              result: { 
+                passed: false, 
+                message: `Test execution error: ${error instanceof Error ? error.message : 'Unknown error'}` 
+              }
+            }, '*');
+          }
+        }
       }
     };
 
@@ -257,6 +423,19 @@ export default function ProjectPage({ params }: Params) {
 
   return (
     <div className="flex h-screen w-screen bg-gray-100 dark:bg-gray-800 overflow-hidden">
+      {/* Checkpoint Floating UI */}
+      {projectData && (
+        <CheckpointFloatingUI
+          projectData={projectData}
+          currentCheckpoint={currentCheckpoint}
+          checkpointProgress={checkpointProgress}
+          isTestingInProgress={isTestingInProgress}
+          onCheckpointChange={handleCheckpointChange}
+          onRunTests={handleRunTests}
+          canNavigateToCheckpoint={canNavigateToCheckpoint}
+        />
+      )}
+      
       {/* File Explorer Sidebar */}
       <ResizableSidebar>
         <FileExplorer
@@ -297,7 +476,7 @@ export default function ProjectPage({ params }: Params) {
         </div>
         <div className="flex flex-col h-full bg-white dark:bg-gray-900 border-l border-gray-300 dark:border-gray-700 overflow-hidden">
           <div className="flex-1 overflow-hidden">
-            <PreviewIframe srcDoc={srcDoc} />
+            <PreviewIframe ref={previewIframeRef} srcDoc={srcDoc} />
           </div>
           <ConsoleOutput
             logs={consoleLogs}

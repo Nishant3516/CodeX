@@ -1,0 +1,147 @@
+{
+  "projectId": "todo-app-1",
+  "title": "Todo List Application",
+  "description": "Build a fully functional todo list app with add, edit, delete, and search functionality",
+  "requirements": [
+    "Create a clean and responsive user interface",
+    "Implement CRUD operations for todo items",
+    "Add search and filter functionality",
+    "Use semantic HTML and proper CSS styling"
+  ],
+  "checkpoints": [
+    {
+      "id": 1,
+      "title": "Basic HTML Structure",
+      "description": "Create the basic HTML structure for the todo app including a title, input field, add button, and container for todo items.",
+      "requirements": [
+        "Add an h1 element with id='app-title' containing 'Todo List'",
+        "Create an input field with id='todo-input' and placeholder='Enter a new todo...'",
+        "Add a button with id='add-btn' and text 'Add Todo'",
+        "Create a div container with id='todo-list' for displaying todos",
+        "Add a search input with id='search-input' and placeholder='Search todos...'"
+      ],
+      "boilerplateCode": {
+        "index.html": "<!DOCTYPE html>\n<html lang=\"en\">\n<head>\n    <meta charset=\"UTF-8\">\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0\">\n    <title>Todo App</title>\n    <link rel=\"stylesheet\" href=\"styles.css\">\n</head>\n<body>\n    <!-- Add your HTML structure here -->\n    \n    <script src=\"script.js\"></script>\n</body>\n</html>",
+        "styles.css": "/* Basic styling for todo app */\nbody {\n    font-family: Arial, sans-serif;\n    max-width: 600px;\n    margin: 0 auto;\n    padding: 20px;\n}",
+        "script.js": "// JavaScript for todo app functionality\nconsole.log('Todo app loaded');"
+      },
+      "tests": [
+        {
+          "testId": 1,
+          "title": "App Title Exists",
+          "description": "Check if h1 element with id='app-title' exists and contains 'Todo List'",
+          "testCode": "function testAppTitle() {\n    const title = document.getElementById('app-title');\n    if (!title) {\n        return { passed: false, message: 'h1 element with id=\"app-title\" not found' };\n    }\n    if (title.textContent.trim() !== 'Todo List') {\n        return { passed: false, message: 'App title should contain \"Todo List\"' };\n    }\n    return { passed: true, message: 'App title exists and is correct' };\n}"
+        },
+        {
+          "testId": 2,
+          "title": "Todo Input Field Exists",
+          "description": "Check if input field with id='todo-input' exists",
+          "testCode": "function testTodoInput() {\n    const input = document.getElementById('todo-input');\n    if (!input) {\n        return { passed: false, message: 'Input element with id=\"todo-input\" not found' };\n    }\n    if (input.placeholder !== 'Enter a new todo...') {\n        return { passed: false, message: 'Input placeholder should be \"Enter a new todo...\"' };\n    }\n    return { passed: true, message: 'Todo input field exists with correct placeholder' };\n}"
+        },
+        {
+          "testId": 3,
+          "title": "Add Button Exists",
+          "description": "Check if button with id='add-btn' exists",
+          "testCode": "function testAddButton() {\n    const button = document.getElementById('add-btn');\n    if (!button) {\n        return { passed: false, message: 'Button element with id=\"add-btn\" not found' };\n    }\n    if (button.textContent.trim() !== 'Add Todo') {\n        return { passed: false, message: 'Button text should be \"Add Todo\"' };\n    }\n    return { passed: true, message: 'Add button exists with correct text' };\n}"
+        },
+        {
+          "testId": 4,
+          "title": "Todo List Container Exists",
+          "description": "Check if div container with id='todo-list' exists",
+          "testCode": "function testTodoListContainer() {\n    const container = document.getElementById('todo-list');\n    if (!container) {\n        return { passed: false, message: 'Div element with id=\"todo-list\" not found' };\n    }\n    return { passed: true, message: 'Todo list container exists' };\n}"
+        }
+      ]
+    },
+    {
+      "id": 2,
+      "title": "Add Todo Functionality",
+      "description": "Implement the ability to add new todo items to the list.",
+      "requirements": [
+        "When the 'Add Todo' button is clicked, create a new todo item",
+        "Each todo item should be a div with class='todo-item'",
+        "Each todo item should contain a span with class='todo-text' for the text",
+        "Each todo item should have a delete button with class='delete-btn'",
+        "Clear the input field after adding a todo",
+        "Don't add empty todos"
+      ],
+      "boilerplateCode": {
+        "index.html": "<!DOCTYPE html>\n<html lang=\"en\">\n<head>\n    <meta charset=\"UTF-8\">\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0\">\n    <title>Todo App</title>\n    <link rel=\"stylesheet\" href=\"styles.css\">\n</head>\n<body>\n    <h1 id=\"app-title\">Todo List</h1>\n    <input type=\"text\" id=\"todo-input\" placeholder=\"Enter a new todo...\">\n    <button id=\"add-btn\">Add Todo</button>\n    <input type=\"text\" id=\"search-input\" placeholder=\"Search todos...\">\n    <div id=\"todo-list\"></div>\n    \n    <script src=\"script.js\"></script>\n</body>\n</html>",
+        "styles.css": "body {\n    font-family: Arial, sans-serif;\n    max-width: 600px;\n    margin: 0 auto;\n    padding: 20px;\n}\n\n#app-title {\n    text-align: center;\n    color: #333;\n}\n\n#todo-input, #search-input {\n    width: 70%;\n    padding: 10px;\n    margin: 10px 0;\n    border: 1px solid #ddd;\n    border-radius: 4px;\n}\n\n#add-btn {\n    width: 25%;\n    padding: 10px;\n    background-color: #007bff;\n    color: white;\n    border: none;\n    border-radius: 4px;\n    cursor: pointer;\n}\n\n.todo-item {\n    display: flex;\n    justify-content: space-between;\n    align-items: center;\n    padding: 10px;\n    margin: 5px 0;\n    border: 1px solid #eee;\n    border-radius: 4px;\n}\n\n.delete-btn {\n    background-color: #dc3545;\n    color: white;\n    border: none;\n    padding: 5px 10px;\n    border-radius: 3px;\n    cursor: pointer;\n}",
+        "script.js": "// Todo app JavaScript\nlet todos = [];\n\n// Add your add todo functionality here\nconsole.log('Todo app ready for add functionality');"
+      },
+      "tests": [
+        {
+          "testId": 5,
+          "title": "Add Todo Creates New Item",
+          "description": "Test that clicking add button creates a new todo item",
+          "testCode": "function testAddTodo() {\n    const input = document.getElementById('todo-input');\n    const addBtn = document.getElementById('add-btn');\n    const todoList = document.getElementById('todo-list');\n    \n    // Clear any existing todos\n    todoList.innerHTML = '';\n    \n    // Add a test todo\n    input.value = 'Test Todo Item';\n    addBtn.click();\n    \n    const todoItems = todoList.querySelectorAll('.todo-item');\n    if (todoItems.length === 0) {\n        return { passed: false, message: 'No todo item was created when add button was clicked' };\n    }\n    \n    const todoText = todoItems[0].querySelector('.todo-text');\n    if (!todoText) {\n        return { passed: false, message: 'Todo item should contain an element with class=\"todo-text\"' };\n    }\n    \n    if (todoText.textContent.trim() !== 'Test Todo Item') {\n        return { passed: false, message: 'Todo text should match the input value' };\n    }\n    \n    return { passed: true, message: 'Todo item created successfully' };\n}"
+        },
+        {
+          "testId": 6,
+          "title": "Input Clears After Adding",
+          "description": "Test that input field is cleared after adding a todo",
+          "testCode": "function testInputClears() {\n    const input = document.getElementById('todo-input');\n    const addBtn = document.getElementById('add-btn');\n    \n    input.value = 'Another Test Todo';\n    addBtn.click();\n    \n    if (input.value !== '') {\n        return { passed: false, message: 'Input field should be cleared after adding a todo' };\n    }\n    \n    return { passed: true, message: 'Input field cleared successfully' };\n}"
+        },
+        {
+          "testId": 7,
+          "title": "Delete Button Exists",
+          "description": "Test that each todo item has a delete button",
+          "testCode": "function testDeleteButton() {\n    const input = document.getElementById('todo-input');\n    const addBtn = document.getElementById('add-btn');\n    const todoList = document.getElementById('todo-list');\n    \n    todoList.innerHTML = '';\n    input.value = 'Todo with Delete Button';\n    addBtn.click();\n    \n    const todoItem = todoList.querySelector('.todo-item');\n    if (!todoItem) {\n        return { passed: false, message: 'No todo item found' };\n    }\n    \n    const deleteBtn = todoItem.querySelector('.delete-btn');\n    if (!deleteBtn) {\n        return { passed: false, message: 'Todo item should contain a delete button with class=\"delete-btn\"' };\n    }\n    \n    return { passed: true, message: 'Delete button exists in todo item' };\n}"
+        }
+      ]
+    },
+    {
+      "id": 3,
+      "title": "Delete Todo Functionality",
+      "description": "Implement the ability to delete todo items from the list.",
+      "requirements": [
+        "When a delete button is clicked, remove the corresponding todo item",
+        "The todo should be removed from both the DOM and the todos array",
+        "Update the display after deletion"
+      ],
+      "boilerplateCode": {
+        "index.html": "<!DOCTYPE html>\n<html lang=\"en\">\n<head>\n    <meta charset=\"UTF-8\">\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0\">\n    <title>Todo App</title>\n    <link rel=\"stylesheet\" href=\"styles.css\">\n</head>\n<body>\n    <h1 id=\"app-title\">Todo List</h1>\n    <input type=\"text\" id=\"todo-input\" placeholder=\"Enter a new todo...\">\n    <button id=\"add-btn\">Add Todo</button>\n    <input type=\"text\" id=\"search-input\" placeholder=\"Search todos...\">\n    <div id=\"todo-list\"></div>\n    \n    <script src=\"script.js\"></script>\n</body>\n</html>",
+        "styles.css": "body {\n    font-family: Arial, sans-serif;\n    max-width: 600px;\n    margin: 0 auto;\n    padding: 20px;\n}\n\n#app-title {\n    text-align: center;\n    color: #333;\n}\n\n#todo-input, #search-input {\n    width: 70%;\n    padding: 10px;\n    margin: 10px 0;\n    border: 1px solid #ddd;\n    border-radius: 4px;\n}\n\n#add-btn {\n    width: 25%;\n    padding: 10px;\n    background-color: #007bff;\n    color: white;\n    border: none;\n    border-radius: 4px;\n    cursor: pointer;\n}\n\n.todo-item {\n    display: flex;\n    justify-content: space-between;\n    align-items: center;\n    padding: 10px;\n    margin: 5px 0;\n    border: 1px solid #eee;\n    border-radius: 4px;\n}\n\n.delete-btn {\n    background-color: #dc3545;\n    color: white;\n    border: none;\n    padding: 5px 10px;\n    border-radius: 3px;\n    cursor: pointer;\n}\n\n.delete-btn:hover {\n    background-color: #c82333;\n}",
+        "script.js": "let todos = [];\n\nfunction addTodo() {\n    const input = document.getElementById('todo-input');\n    const todoText = input.value.trim();\n    \n    if (todoText === '') return;\n    \n    const todo = {\n        id: Date.now(),\n        text: todoText\n    };\n    \n    todos.push(todo);\n    input.value = '';\n    renderTodos();\n}\n\nfunction renderTodos() {\n    const todoList = document.getElementById('todo-list');\n    todoList.innerHTML = '';\n    \n    todos.forEach(todo => {\n        const todoItem = document.createElement('div');\n        todoItem.className = 'todo-item';\n        todoItem.innerHTML = `\n            <span class=\"todo-text\">${todo.text}</span>\n            <button class=\"delete-btn\" onclick=\"deleteTodo(${todo.id})\">Delete</button>\n        `;\n        todoList.appendChild(todoItem);\n    });\n}\n\n// Add delete functionality here\nfunction deleteTodo(id) {\n    // Implement delete functionality\n}\n\ndocument.getElementById('add-btn').addEventListener('click', addTodo);\ndocument.getElementById('todo-input').addEventListener('keypress', function(e) {\n    if (e.key === 'Enter') {\n        addTodo();\n    }\n});"
+      },
+      "tests": [
+        {
+          "testId": 8,
+          "title": "Delete Todo Removes Item",
+          "description": "Test that clicking delete button removes the todo item",
+          "testCode": "function testDeleteTodo() {\n    const input = document.getElementById('todo-input');\n    const addBtn = document.getElementById('add-btn');\n    const todoList = document.getElementById('todo-list');\n    \n    // Clear and add test todos\n    todoList.innerHTML = '';\n    if (window.todos) window.todos = [];\n    \n    input.value = 'Todo to Delete';\n    addBtn.click();\n    input.value = 'Todo to Keep';\n    addBtn.click();\n    \n    let todoItems = todoList.querySelectorAll('.todo-item');\n    if (todoItems.length !== 2) {\n        return { passed: false, message: 'Should have 2 todo items before deletion' };\n    }\n    \n    // Click delete button on first item\n    const firstDeleteBtn = todoItems[0].querySelector('.delete-btn');\n    if (!firstDeleteBtn) {\n        return { passed: false, message: 'Delete button not found' };\n    }\n    \n    firstDeleteBtn.click();\n    \n    todoItems = todoList.querySelectorAll('.todo-item');\n    if (todoItems.length !== 1) {\n        return { passed: false, message: 'Todo item was not deleted from DOM' };\n    }\n    \n    const remainingText = todoItems[0].querySelector('.todo-text').textContent;\n    if (remainingText !== 'Todo to Keep') {\n        return { passed: false, message: 'Wrong todo item was deleted' };\n    }\n    \n    return { passed: true, message: 'Todo deleted successfully' };\n}"
+        }
+      ]
+    },
+    {
+      "id": 4,
+      "title": "Search Todo Functionality",
+      "description": "Implement search functionality to filter todos based on user input.",
+      "requirements": [
+        "When user types in search input with id='search-input', filter todos in real-time",
+        "Show only todos that contain the search text (case-insensitive)",
+        "If search is empty, show all todos",
+        "Add a clear search button or functionality"
+      ],
+      "boilerplateCode": {
+        "index.html": "<!DOCTYPE html>\n<html lang=\"en\">\n<head>\n    <meta charset=\"UTF-8\">\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0\">\n    <title>Todo App</title>\n    <link rel=\"stylesheet\" href=\"styles.css\">\n</head>\n<body>\n    <h1 id=\"app-title\">Todo List</h1>\n    <div class=\"input-container\">\n        <input type=\"text\" id=\"todo-input\" placeholder=\"Enter a new todo...\">\n        <button id=\"add-btn\">Add Todo</button>\n    </div>\n    <div class=\"search-container\">\n        <input type=\"text\" id=\"search-input\" placeholder=\"Search todos...\">\n        <button id=\"clear-search-btn\">Clear</button>\n    </div>\n    <div id=\"todo-list\"></div>\n    \n    <script src=\"script.js\"></script>\n</body>\n</html>",
+        "styles.css": "body {\n    font-family: Arial, sans-serif;\n    max-width: 600px;\n    margin: 0 auto;\n    padding: 20px;\n}\n\n#app-title {\n    text-align: center;\n    color: #333;\n    margin-bottom: 30px;\n}\n\n.input-container, .search-container {\n    display: flex;\n    gap: 10px;\n    margin-bottom: 20px;\n}\n\n#todo-input, #search-input {\n    flex: 1;\n    padding: 10px;\n    border: 1px solid #ddd;\n    border-radius: 4px;\n}\n\n#add-btn, #clear-search-btn {\n    padding: 10px 20px;\n    background-color: #007bff;\n    color: white;\n    border: none;\n    border-radius: 4px;\n    cursor: pointer;\n}\n\n#clear-search-btn {\n    background-color: #6c757d;\n}\n\n.todo-item {\n    display: flex;\n    justify-content: space-between;\n    align-items: center;\n    padding: 10px;\n    margin: 5px 0;\n    border: 1px solid #eee;\n    border-radius: 4px;\n    background-color: #f9f9f9;\n}\n\n.todo-item.hidden {\n    display: none;\n}\n\n.delete-btn {\n    background-color: #dc3545;\n    color: white;\n    border: none;\n    padding: 5px 10px;\n    border-radius: 3px;\n    cursor: pointer;\n}\n\n.delete-btn:hover {\n    background-color: #c82333;\n}",
+        "script.js": "let todos = [];\n\nfunction addTodo() {\n    const input = document.getElementById('todo-input');\n    const todoText = input.value.trim();\n    \n    if (todoText === '') return;\n    \n    const todo = {\n        id: Date.now(),\n        text: todoText\n    };\n    \n    todos.push(todo);\n    input.value = '';\n    renderTodos();\n}\n\nfunction deleteTodo(id) {\n    todos = todos.filter(todo => todo.id !== id);\n    renderTodos();\n}\n\nfunction renderTodos() {\n    const todoList = document.getElementById('todo-list');\n    const searchTerm = document.getElementById('search-input').value.toLowerCase();\n    \n    todoList.innerHTML = '';\n    \n    todos.forEach(todo => {\n        const todoItem = document.createElement('div');\n        todoItem.className = 'todo-item';\n        todoItem.innerHTML = `\n            <span class=\"todo-text\">${todo.text}</span>\n            <button class=\"delete-btn\" onclick=\"deleteTodo(${todo.id})\">Delete</button>\n        `;\n        \n        // Filter based on search\n        if (searchTerm === '' || todo.text.toLowerCase().includes(searchTerm)) {\n            todoList.appendChild(todoItem);\n        }\n    });\n}\n\n// Add search functionality here\nfunction searchTodos() {\n    // Implement search functionality\n}\n\ndocument.getElementById('add-btn').addEventListener('click', addTodo);\ndocument.getElementById('todo-input').addEventListener('keypress', function(e) {\n    if (e.key === 'Enter') {\n        addTodo();\n    }\n});\n\n// Add search event listeners here"
+      },
+      "tests": [
+        {
+          "testId": 9,
+          "title": "Search Filters Todos",
+          "description": "Test that search input filters todos correctly",
+          "testCode": "function testSearchFilter() {\n    const input = document.getElementById('todo-input');\n    const addBtn = document.getElementById('add-btn');\n    const searchInput = document.getElementById('search-input');\n    const todoList = document.getElementById('todo-list');\n    \n    // Clear and add test todos\n    todoList.innerHTML = '';\n    if (window.todos) window.todos = [];\n    \n    input.value = 'Buy groceries';\n    addBtn.click();\n    input.value = 'Walk the dog';\n    addBtn.click();\n    input.value = 'Buy books';\n    addBtn.click();\n    \n    // Search for 'buy'\n    searchInput.value = 'buy';\n    searchInput.dispatchEvent(new Event('input'));\n    \n    setTimeout(() => {\n        const visibleTodos = todoList.querySelectorAll('.todo-item:not(.hidden)');\n        const allTodos = todoList.querySelectorAll('.todo-item');\n        \n        if (allTodos.length < 3) {\n            return { passed: false, message: 'Not all todos were added' };\n        }\n        \n        // Should show 2 todos containing 'buy'\n        let visibleCount = 0;\n        allTodos.forEach(todo => {\n            const text = todo.querySelector('.todo-text').textContent.toLowerCase();\n            if (text.includes('buy')) {\n                if (todo.style.display === 'none' || todo.classList.contains('hidden')) {\n                    return { passed: false, message: 'Todo containing \"buy\" should be visible' };\n                }\n                visibleCount++;\n            } else {\n                if (todo.style.display !== 'none' && !todo.classList.contains('hidden')) {\n                    return { passed: false, message: 'Todo not containing \"buy\" should be hidden' };\n                }\n            }\n        });\n        \n        if (visibleCount !== 2) {\n            return { passed: false, message: `Expected 2 visible todos, got ${visibleCount}` };\n        }\n        \n        return { passed: true, message: 'Search filter works correctly' };\n    }, 100);\n    \n    return { passed: true, message: 'Search test initiated' };\n}"
+        },
+        {
+          "testId": 10,
+          "title": "Clear Search Shows All Todos",
+          "description": "Test that clearing search shows all todos",
+          "testCode": "function testClearSearch() {\n    const searchInput = document.getElementById('search-input');\n    const clearBtn = document.getElementById('clear-search-btn');\n    const todoList = document.getElementById('todo-list');\n    \n    // First set a search term\n    searchInput.value = 'test';\n    searchInput.dispatchEvent(new Event('input'));\n    \n    // Then clear it\n    if (clearBtn) {\n        clearBtn.click();\n    } else {\n        searchInput.value = '';\n        searchInput.dispatchEvent(new Event('input'));\n    }\n    \n    setTimeout(() => {\n        const allTodos = todoList.querySelectorAll('.todo-item');\n        let hiddenCount = 0;\n        \n        allTodos.forEach(todo => {\n            if (todo.style.display === 'none' || todo.classList.contains('hidden')) {\n                hiddenCount++;\n            }\n        });\n        \n        if (hiddenCount > 0) {\n            return { passed: false, message: 'All todos should be visible when search is cleared' };\n        }\n        \n        return { passed: true, message: 'Clear search works correctly' };\n    }, 100);\n    \n    return { passed: true, message: 'Clear search test initiated' };\n}"
+        }
+      ]
+    }
+  ]
+}
