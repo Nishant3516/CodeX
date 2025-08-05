@@ -1,6 +1,17 @@
 import React, { FC, useState } from 'react';
 import FileCreateModal from './FileCreateModal';
 
+const getFileIcon = (filename: string) => {
+  const ext = filename.split('.').pop()?.toLowerCase();
+  switch (ext) {
+    case 'html': return '🌐';
+    case 'css': return '🎨';
+    case 'js': return '⚡';
+    case 'txt': return '📝';
+    default: return '📄';
+  }
+};
+
 type FileExplorerProps = {
   files: string[];
   activeFile: string;
@@ -15,6 +26,15 @@ const FileExplorer: FC<FileExplorerProps> = ({ files, activeFile, onSelect, onCr
 
   const handleCreate = () => setIsModalOpen(true);
   const handleModalCreate = (filename: string) => {
+    // Validate file extension
+    const ext = filename.split('.').pop()?.toLowerCase();
+    const allowedExts = ['html', 'css', 'js', 'txt'];
+    
+    if (!ext || !allowedExts.includes(ext)) {
+      alert('⚠️ Only .html, .css, .js, and .txt files are allowed');
+      return;
+    }
+    
     onCreate(filename);
     setIsModalOpen(false);
   };
@@ -45,11 +65,11 @@ const FileExplorer: FC<FileExplorerProps> = ({ files, activeFile, onSelect, onCr
                   onClick={() => onSelect(file)}
                   className={`w-full text-left flex items-center gap-1 px-2 py-1 rounded ${
                     file === activeFile
-                      ? 'bg-gray-300 dark:bg-gray-700 font-medium text-gray-900 dark:text-white'
+                      ? 'bg-blue-600 text-white font-medium'
                       : 'hover:bg-gray-200 dark:hover:bg-gray-800'
                   }`}
                 >
-                  📄 {file}
+                  {getFileIcon(file)} {file}
                 </button>
               </li>
             ))}

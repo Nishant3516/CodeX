@@ -1,20 +1,23 @@
-import React, { FC, useState } from 'react';
+import React, { FC, useState, useRef } from 'react';
 
 type SplitPaneProps = {
-  initialLeftWidth?: number;
-  minLeftWidth?: number;
-  maxLeftWidth?: number;
+  /** percentages of container width */
+  initialLeftWidth?: number; // default percent for left pane
+  minLeftWidth?: number;     // minimum percent for left pane
+  maxLeftWidth?: number;     // maximum percent for left pane
   children: [React.ReactNode, React.ReactNode];
 };
 
-const SplitPane: FC<SplitPaneProps> = ({ 
-  children, 
-  initialLeftWidth = 500, 
-  minLeftWidth = 300,
-  maxLeftWidth 
+const SplitPane: FC<SplitPaneProps> = ({
+  children,
+  initialLeftWidth = 50,  // percent for code editor
+  minLeftWidth = 45,      // minimum percent
+  maxLeftWidth = 60,      // maximum percent
 }) => {
-  const [leftWidth, setLeftWidth] = useState<number>(initialLeftWidth);
+  // percent width of left pane
+  const [leftPct, setLeftPct] = useState<number>(initialLeftWidth);
   const [isDragging, setIsDragging] = useState<boolean>(false);
+  const containerRef = useRef<HTMLDivElement>(null);
 
   const onMouseDown = (e: React.MouseEvent) => {
     e.preventDefault();
@@ -25,13 +28,16 @@ const SplitPane: FC<SplitPaneProps> = ({
     document.body.style.pointerEvents = 'none';
     
     const startX = e.clientX;
-    const startWidth = leftWidth;
+    const startPct = leftPct;
+    const containerWidth = containerRef.current?.clientWidth || window.innerWidth;
     
     const onMouseMove = (e2: MouseEvent) => {
       e2.preventDefault();
-      const maxWidth = maxLeftWidth || window.innerWidth - 300; // ensure 300px min for right pane
-      const newWidth = Math.max(minLeftWidth, Math.min(maxWidth, startWidth + e2.clientX - startX));
-      setLeftWidth(newWidth);
+      e2.preventDefault();
+      const deltaPx = e2.clientX - startX;
+      const deltaPct = (deltaPx / containerWidth) * 100;
+      const newPct = Math.max(minLeftWidth, Math.min(maxLeftWidth, startPct + deltaPct));
+      setLeftPct(newPct);
       // Trigger resize event immediately for Monaco
       requestAnimationFrame(() => {
         window.dispatchEvent(new Event('resize'));
@@ -47,9 +53,7 @@ const SplitPane: FC<SplitPaneProps> = ({
       document.body.style.cursor = '';
       document.body.style.pointerEvents = '';
       // Final resize event
-      setTimeout(() => {
-        window.dispatchEvent(new Event('resize'));
-      }, 10);
+      setTimeout(() => window.dispatchEvent(new Event('resize')), 10);
     };
     
     document.addEventListener('mousemove', onMouseMove);
@@ -57,9 +61,9 @@ const SplitPane: FC<SplitPaneProps> = ({
   };  const [leftChild, rightChild] = children;
 
   return (
-    <div className="flex flex-1 h-full select-none">
+    <div ref={containerRef} className="flex flex-1 h-full select-none">
       {/* Left pane with fixed width */}
-      <div style={{ width: leftWidth, flexShrink: 0 }} className="flex flex-col h-full overflow-hidden">
+      <div style={{ width: `${leftPct}%`, flexShrink: 0 }} className="flex flex-col h-full overflow-hidden">
         {leftChild}
       </div>
       {/* Resizer handle */}
@@ -71,7 +75,7 @@ const SplitPane: FC<SplitPaneProps> = ({
         style={{ minWidth: '4px' }}
       />
       {/* Right pane flex-grow */}
-      <div className="flex-1 h-full overflow-hidden" style={{ minWidth: '300px' }}>
+      <div style={{ width: `${100 - leftPct}%`, flexShrink: 0 }} className="flex flex-col h-full overflow-auto">
         {rightChild}
       </div>
     </div>
