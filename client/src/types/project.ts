@@ -5,6 +5,14 @@ export interface TestCase {
   testCode: string;
 }
 
+export interface StoredProgress{
+  projectId:string;
+  checkPointProgress: CheckpointProgress[];
+  files: {
+    [fileName: string]: string;
+  };
+}
+
 export interface TestResult {
   passed: boolean;
   message: string;

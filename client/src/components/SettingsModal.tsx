@@ -177,7 +177,7 @@ const SettingsModal: FC<SettingsModalProps> = ({ isOpen, onClose, settings, onSa
                       <p className="text-sm text-gray-500 dark:text-gray-400">
                         {key === 'run' && 'Execute your code'}
                         {key === 'prettify' && 'Format and beautify code'}
-                        {key === 'submit' && 'Submit your project'}
+                        {key === 'submit' && 'Save your progress'}
                         {key === 'save' && 'Save current file'}
                         {key === 'newFile' && 'Create new file'}
                         {key === 'toggleConsole' && 'Show/hide console'}

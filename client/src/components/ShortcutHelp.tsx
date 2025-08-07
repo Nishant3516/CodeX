@@ -11,7 +11,7 @@ const ShortcutHelp: FC<ShortcutHelpProps> = ({ shortcuts }) => {
   const shortcutList = [
     { key: 'run', label: 'Run Code', icon: '▶️' },
     { key: 'prettify', label: 'Prettify Code', icon: '✨' },
-    { key: 'submit', label: 'Submit Project', icon: '📤' },
+    { key: 'submit', label: 'Save Progress', icon: '�' },
     { key: 'toggleConsole', label: 'Toggle Console', icon: '🖥️' },
     { key: 'toggleValidation', label: 'Toggle Validation', icon: '✅' },
   ];

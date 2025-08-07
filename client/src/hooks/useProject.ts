@@ -12,7 +12,7 @@ export function useProject(
 ) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<Error | null>(null);
-  const initializeProject = useProjectStore(state => state.initializeProject);
+  const setProjectData = useProjectStore(state => state.setProjectData);
 
   useEffect(() => {
     let canceled = false;
@@ -28,7 +28,7 @@ export function useProject(
           );
 
           if (!canceled) {
-            initializeProject({
+            setProjectData({
               projectId: quest.id,
               title: quest.name,
               description: quest.description,
@@ -52,7 +52,7 @@ export function useProject(
     return () => {
       canceled = true;
     };
-  }, []); // Remove initializeProject from dependencies
+  }, []); // Remove setProjectData from dependencies
 
   return { loading, error };
 }

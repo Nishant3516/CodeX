@@ -1,6 +1,7 @@
 import React, { FC } from 'react';
 import ShortcutHelp from './ShortcutHelp';
 import { KeyboardShortcuts } from '@/hooks/useKeyboardShortcuts';
+import { CheckpointProgress } from '@/types/project';
 
 type RunControlsProps = {
   onRun: () => void;
@@ -8,10 +9,13 @@ type RunControlsProps = {
   onPrettify: () => void;
   onSettings: () => void;
   shortcuts: KeyboardShortcuts;
+  progress:CheckpointProgress[];
 };
 
-const RunControls: FC<RunControlsProps> = ({ onRun, onSubmit, onPrettify, onSettings, shortcuts }) => (
-  <div className="flex items-center justify-between p-3 bg-[#2d2d30] border-t border-[#3c3c3c]">
+const RunControls: FC<RunControlsProps> = ({ onRun, onSubmit,progress, onPrettify, onSettings, shortcuts }) => {
+const isProjectComplete = progress.every(p => p.completed);
+  return (
+<div className="flex items-center justify-between p-3 bg-[#2d2d30] border-t border-[#3c3c3c]">
     <div className="flex gap-3">
       <button
         onClick={onRun}
@@ -29,10 +33,10 @@ const RunControls: FC<RunControlsProps> = ({ onRun, onSubmit, onPrettify, onSett
       </button>
       <button
         onClick={onSubmit}
-        className="flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-md transition-colors font-medium"
-        title={`Submit Project (${shortcuts.submit})`}
+        className={`flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-md transition-colors font-medium`}
+        title={`Save Progress (${shortcuts.submit})`}
       >
-        📤 Submit
+        💾 Save
       </button>
     </div>
     
@@ -47,6 +51,9 @@ const RunControls: FC<RunControlsProps> = ({ onRun, onSubmit, onPrettify, onSett
       </button>
     </div>
   </div>
-);
+
+  )
+}
+  
 
 export default RunControls;

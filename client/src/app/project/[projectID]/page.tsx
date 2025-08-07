@@ -17,7 +17,7 @@ import { TestRunner } from "@/utils/testRunner";
 import { useKeyboardShortcuts } from "@/hooks/useKeyboardShortcuts";
 import { useProject } from "@/hooks/useProject";
 import { useProjectStore } from "@/store/projectStore";
-import { ProjectData, CheckpointProgress } from "@/types/project";
+import { ProjectData, CheckpointProgress, StoredProgress } from "@/types/project";
 
 
 type Params = {
@@ -69,11 +69,23 @@ export default function ProjectPage({ params }: Params) {
     navigateToCheckpoint,
     canNavigateToCheckpoint,
     updateFileContent,
+    setFiles,
     setActiveFile,
     addFile,
     setIsTestingInProgress,
-    updateCheckpointProgress
+    updateCheckpointProgress,
+    initializeProject,
+    saveProgress,
   } = useProjectStore();
+
+  // Initialize state from localStorage or boilerplate when projectData is ready
+  useEffect(() => {
+    if (!projectData) return;
+    (async () => {
+      const { projectID } = await params;
+      initializeProject(projectID, projectData);
+    })();
+  }, [projectData, initializeProject, params]);
   
   const previewIframeRef = useRef<HTMLIFrameElement>(null);
   const debounceTimerRef = useRef<NodeJS.Timeout | null>(null);
@@ -87,14 +99,41 @@ export default function ProjectPage({ params }: Params) {
     }
   };
 
+  const updateStoredContent = async (activeFile: string, content: string) => {
+    const storedProgress = localStorage.getItem('projectProgress');
+    const parsedProgress = storedProgress ? JSON.parse(storedProgress) : [];
+    const projectId = (await params).projectID;
+    let progress: StoredProgress = parsedProgress.find(async (p: StoredProgress) => p.projectId === projectId) ||   {
+      files: {},
+      projectId: projectId,
+      checkPointProgress: []
+    };
+    if(!storedProgress){
+      localStorage.setItem('projectProgress', JSON.stringify([progress]));
+      return;
+    }
+
+    parsedProgress.forEach((p: StoredProgress) => {
+      if (p.projectId === projectId) {
+        p.files[activeFile] = content;
+        p.checkPointProgress = checkpointProgress;
+      }
+    });
+    // Update the stored progress in localStorage
+    localStorage.setItem('projectProgress', JSON.stringify(parsedProgress));
+  }
+
   const handleContentChange = useCallback((value: string) => {
     // Clear previous debounce timer
     if (debounceTimerRef.current) {
       clearTimeout(debounceTimerRef.current);
     }
+
+    
     
     // Debounce the store update
     debounceTimerRef.current = setTimeout(() => {
+      updateStoredContent(activeFile, value);
       updateFileContent(activeFile, value);
     }, 300); // 300ms debounce for content changes
     
@@ -291,9 +330,12 @@ export default function ProjectPage({ params }: Params) {
     setConsoleLogs(['🚀 Code executed successfully']);
   }, [contents, settings.cssAutoSemicolon]); // Only depend on contents and settings
 
-  const handleSubmit = () => {
-    // TODO: implement submission logic, e.g., send contents to server
-    console.log("Submit project", contents);
+  const handleSubmit = async () => {
+    // Save progress to localStorage
+    const { projectID } = await params;
+    saveProgress(projectID);
+    setConsoleLogs(prev => [...prev, '💾 Progress saved successfully']);
+    console.log("Project progress saved", contents);
   };
 
   const handlePrettify = async () => {
@@ -519,6 +561,29 @@ export default function ProjectPage({ params }: Params) {
     return () => clearTimeout(debounceTimer);
   }, [contents["index.html"], contents["styles.css"], contents["script.js"], updatePreview]);
 
+
+  async function loadAndInitializeProject(params: Promise<{ projectID: string }>, storedProgress: string ) {
+   const projectId = (await params).projectID;
+    try {
+      const parsedProgress = JSON.parse(storedProgress) as StoredProgress[];
+
+      const thisProjectData = parsedProgress.find((p: StoredProgress) => p.projectId === projectId) as StoredProgress;
+      if (!thisProjectData) {
+        return;
+      }
+      setFiles(Object.keys(thisProjectData.files));
+      Object.entries(thisProjectData.files).forEach(([fileName, fileContent]) => {
+        updateFileContent(fileName, fileContent);
+      });
+      thisProjectData.checkPointProgress.forEach((checkpoint: CheckpointProgress) => {
+        updateCheckpointProgress(checkpoint);
+      });
+      setActiveFile(thisProjectData.files[0] || "index.html");
+    } catch (error) {
+      console.error("Failed to load project:", error);
+      return;
+    }
+  }
   // Load settings from localStorage on mount
   useEffect(() => {
     const saved = localStorage.getItem('editorSettings');
@@ -679,6 +744,7 @@ export default function ProjectPage({ params }: Params) {
                 onRun={handleRunTests} 
                 onSubmit={handleSubmit}
                 onPrettify={handlePrettify}
+                progress={checkpointProgress}
                 onSettings={() => setShowSettings(true)}
                 shortcuts={settings.shortcuts}
               />

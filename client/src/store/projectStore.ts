@@ -29,7 +29,8 @@ interface ProjectState {
   setShowRequirements: (show: boolean) => void;
   
   // Complex actions
-  initializeProject: (projectData: ProjectData) => void;
+  initializeProject: (projectId: string, projectData: ProjectData) => void;
+  saveProgress: (projectId: string) => void;
   navigateToCheckpoint: (checkpointId: string) => void;
   canNavigateToCheckpoint: (checkpointId: string) => boolean;
 }
@@ -70,23 +71,47 @@ export const useProjectStore = create<ProjectState>()(
       setShowRequirements: (show) => set({ showRequirements: show }),
 
       // Complex actions
-      initializeProject: (projectData) => {
+      initializeProject: (projectId: string, projectData: ProjectData) => {
+        if (!projectData?.checkpoints) return; // Guard against undefined data
+        
+        // If we have stored progress for this project, use it
+        const storage = localStorage.getItem('projectProgress');
+        if (storage) {
+          try {
+            const parsed = JSON.parse(storage) as Array<{ projectId: string; files: Record<string, string>; checkPointProgress: any[] }>;
+
+            const existing = parsed.find(p => p.projectId === projectId);
+            if (existing) {
+              const storedFiles = Object.keys(existing.files);
+              set({
+                projectData,
+                files: storedFiles,
+                contents: existing.files,
+                currentCheckpoint: existing.checkPointProgress.findLast(cp => cp.completed) >= 0 ? existing.checkPointProgress.findLast(cp => cp.completed)?.checkpointId : projectData.checkpoints[0]?.id || '',
+                checkpointProgress: existing.checkPointProgress,
+                activeFile: storedFiles[0] || ''
+              });
+              return; // initialized from storage
+            }
+          } catch {
+            // malformed storage, ignore and fall back to boilerplate
+          }
+        }
+
+        // No stored data, initialize from boilerplate
         const initialProgress: CheckpointProgress[] = projectData.checkpoints.map(checkpoint => ({
           checkpointId: checkpoint.id,
           completed: false,
           testsResults: {}
         }));
 
-        // Set initial boilerplate code from first checkpoint
-        const firstCheckpoint = projectData.checkpoints[0];
-        let initialContents: Record<string, string> = {};
-        let initialFiles: string[] = [];
-
-        if (firstCheckpoint) {
+        const initialContents: Record<string, string> = {};
+        const initialFiles: string[] = [];
+        if (projectData.boilerplateCode) {
           Object.entries(projectData.boilerplateCode).forEach(([filename, code]) => {
             initialContents[filename] = code;
+            initialFiles.push(filename);
           });
-          initialFiles = Object.keys(initialContents);
         }
 
         set({
@@ -97,6 +122,29 @@ export const useProjectStore = create<ProjectState>()(
           files: initialFiles,
           activeFile: initialFiles[0] || 'index.html'
         });
+      },
+
+      saveProgress: (projectId: string) => {
+        const state = get();
+        if (!state.projectData) return;
+
+        const storage = localStorage.getItem('projectProgress');
+        const parsed = storage ? JSON.parse(storage) : [];
+        
+        const existingIndex = parsed.findIndex((p: any) => p.projectId === projectId);
+        const progressData = {
+          projectId,
+          files: state.contents,
+          checkPointProgress: state.checkpointProgress
+        };
+
+        if (existingIndex >= 0) {
+          parsed[existingIndex] = progressData;
+        } else {
+          parsed.push(progressData);
+        }
+
+        localStorage.setItem('projectProgress', JSON.stringify(parsed));
       },
 
       canNavigateToCheckpoint: (checkpointId) => {
