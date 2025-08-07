@@ -1,0 +1,50 @@
+{
+  "id": "5087f27f-667a-4e82-aa45-98d6ebf3d5e3",
+  "name": "Interactive Todo List",
+  "description": "Build a fully functional todo application with HTML, CSS, and JavaScript. Learn DOM manipulation, event handling, and local storage.",
+  "requirements": [
+    "id='todo-input'",
+    "id='add-button'",
+    "id='todo-list'"
+  ],
+  "checkpoints": [
+    {
+      "id": "f47d36d9-a683-4e78-972e-504369347504",
+      "title": "HTML Structure",
+      "description": "Create the basic HTML structure for the todo app",
+      "requirements": [
+        "id='todo-input'",
+        "id='add-button'",
+        "id='todo-list'"
+      ]
+    },
+    {
+      "id": "22e987d5-b065-410d-910e-b6d7f328c8a9",
+      "title": "CSS Styling",
+      "description": "Add styles to make the todo app look good",
+      "requirements": [
+        "class='todo-item'",
+        "id='todo-input'",
+        "id='add-button'"
+      ]
+    },
+    {
+      "id": "920a8911-be09-45c4-b151-8126b2871f12",
+      "title": "JavaScript Functionality",
+      "description": "Add JavaScript functionality to manage todos",
+      "requirements": [
+        "function name=addTodo",
+        "function name=deleteTodo"
+      ]
+    },
+    {
+      "id": "b527dd51-4e35-4996-ad24-7b181bca992b",
+      "title": "Local Storage Integration",
+      "description": "Persist todos using local storage",
+      "requirements": [
+        "localStorage",
+        "id='load-todos'"
+      ]
+    }
+  ]
+}

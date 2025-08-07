@@ -5,21 +5,21 @@ import { ProjectData, CheckpointProgress, TestResult } from '@/types/project';
 interface ProjectState {
   // Project data
   projectData: ProjectData | null;
-  currentCheckpoint: number;
+  currentCheckpoint: string;
   checkpointProgress: CheckpointProgress[];
   
   // Code state
   files: string[];
   contents: Record<string, string>;
   activeFile: string;
-  
+  boilerplateCode: Record<string, string>; // Optional, can be set during initialization
   // UI state
   isTestingInProgress: boolean;
   showRequirements: boolean;
   
   // Actions
   setProjectData: (data: ProjectData) => void;
-  setCurrentCheckpoint: (checkpointId: number) => void;
+  setCurrentCheckpoint: (checkpointId: string) => void;
   updateCheckpointProgress: (progress: CheckpointProgress) => void;
   setFiles: (files: string[]) => void;
   updateFileContent: (filename: string, content: string) => void;
@@ -30,8 +30,8 @@ interface ProjectState {
   
   // Complex actions
   initializeProject: (projectData: ProjectData) => void;
-  navigateToCheckpoint: (checkpointId: number) => void;
-  canNavigateToCheckpoint: (checkpointId: number) => boolean;
+  navigateToCheckpoint: (checkpointId: string) => void;
+  canNavigateToCheckpoint: (checkpointId: string) => boolean;
 }
 
 export const useProjectStore = create<ProjectState>()(
@@ -39,11 +39,12 @@ export const useProjectStore = create<ProjectState>()(
     (set, get) => ({
       // Initial state
       projectData: null,
-      currentCheckpoint: 1,
+      currentCheckpoint: '',
       checkpointProgress: [],
       files: [],
       contents: {},
       activeFile: '',
+      boilerplateCode: {},
       isTestingInProgress: false,
       showRequirements: false,
 
@@ -82,7 +83,7 @@ export const useProjectStore = create<ProjectState>()(
         let initialFiles: string[] = [];
 
         if (firstCheckpoint) {
-          Object.entries(firstCheckpoint.boilerplateCode).forEach(([filename, code]) => {
+          Object.entries(projectData.boilerplateCode).forEach(([filename, code]) => {
             initialContents[filename] = code;
           });
           initialFiles = Object.keys(initialContents);
@@ -91,7 +92,7 @@ export const useProjectStore = create<ProjectState>()(
         set({
           projectData,
           checkpointProgress: initialProgress,
-          currentCheckpoint: 1,
+          currentCheckpoint: projectData.checkpoints[0]?.id || '',
           contents: initialContents,
           files: initialFiles,
           activeFile: initialFiles[0] || 'index.html'
@@ -100,13 +101,20 @@ export const useProjectStore = create<ProjectState>()(
 
       canNavigateToCheckpoint: (checkpointId) => {
         const state = get();
-        if (checkpointId === 1) return true; // Can always access first checkpoint
+        if (!state.projectData) return false;
+        
+        // Find the index of the requested checkpoint
+        const checkpointIndex = state.projectData.checkpoints.findIndex(cp => cp.id === checkpointId);
+        if (checkpointIndex === 0) return true; // Can always access first checkpoint
         
         // Check if previous checkpoint is completed
-        const previousCheckpoint = state.checkpointProgress.find(
-          cp => cp.checkpointId === checkpointId - 1
+        const previousCheckpoint = state.projectData.checkpoints[checkpointIndex - 1];
+        if (!previousCheckpoint) return false;
+        
+        const previousProgress = state.checkpointProgress.find(
+          cp => cp.checkpointId === previousCheckpoint.id
         );
-        return previousCheckpoint?.completed || false;
+        return previousProgress?.completed || false;
       },
 
       navigateToCheckpoint: (checkpointId) => {

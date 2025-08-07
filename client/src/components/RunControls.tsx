@@ -18,7 +18,7 @@ const RunControls: FC<RunControlsProps> = ({ onRun, onSubmit, onPrettify, onSett
         className="flex items-center gap-2 px-4 py-2 bg-green-600 hover:bg-green-700 text-white rounded-md transition-colors font-medium"
         title={`Run Code (${shortcuts.run})`}
       >
-        ▶️ Run
+        ▶️ Run & Test
       </button>
       <button
         onClick={onPrettify}

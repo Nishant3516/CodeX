@@ -3,12 +3,11 @@ import { ProjectData, Checkpoint, CheckpointProgress } from '@/types/project';
 
 interface CheckpointFloatingUIProps {
   projectData: ProjectData;
-  currentCheckpoint: number;
+  currentCheckpoint: string;
   checkpointProgress: CheckpointProgress[];
   isTestingInProgress: boolean;
-  onCheckpointChange: (checkpointId: number) => boolean;
-  onRunTests: () => void;
-  canNavigateToCheckpoint: (checkpointId: number) => boolean;
+  onCheckpointChange: (checkpointId: string) => boolean;
+  canNavigateToCheckpoint: (checkpointId: string) => boolean;
 }
 
 const CheckpointFloatingUI: React.FC<CheckpointFloatingUIProps> = ({
@@ -17,7 +16,6 @@ const CheckpointFloatingUI: React.FC<CheckpointFloatingUIProps> = ({
   checkpointProgress,
   isTestingInProgress,
   onCheckpointChange,
-  onRunTests,
   canNavigateToCheckpoint
 }) => {
   const [isExpanded, setIsExpanded] = useState(false);
@@ -27,7 +25,7 @@ const CheckpointFloatingUI: React.FC<CheckpointFloatingUIProps> = ({
     return projectData.checkpoints.find(cp => cp.id === currentCheckpoint);
   };
 
-  const getProgressForCheckpoint = (checkpointId: number) => {
+  const getProgressForCheckpoint = (checkpointId: string) => {
     return checkpointProgress.find(cp => cp.checkpointId === checkpointId);
   };
 
@@ -36,7 +34,7 @@ const CheckpointFloatingUI: React.FC<CheckpointFloatingUIProps> = ({
     return Math.round((completedCheckpoints / projectData.checkpoints.length) * 100);
   };
 
-  const calculateCheckpointTestProgress = (checkpointId: number) => {
+  const calculateCheckpointTestProgress = (checkpointId: string) => {
     const progress = getProgressForCheckpoint(checkpointId);
     if (!progress) return 0;
     
@@ -47,11 +45,11 @@ const CheckpointFloatingUI: React.FC<CheckpointFloatingUIProps> = ({
     return Math.round((passedTests / totalTests) * 100);
   };
 
-  const handleCheckpointClick = (checkpointId: number) => {
+  const handleCheckpointClick = (checkpointId: string) => {
     if (!canNavigateToCheckpoint(checkpointId)) {
-      // Show tooltip or notification that checkpoint is locked
       return;
     }
+    setShowRequirements(!showRequirements);
     onCheckpointChange(checkpointId);
   };
 
@@ -61,7 +59,7 @@ const CheckpointFloatingUI: React.FC<CheckpointFloatingUIProps> = ({
   return (
     <>
       {/* Floating Progress Indicator */}
-      <div className="fixed top-6 left-6 z-50">
+      <div className="fixed top-6 right-6 z-50">
         <div 
           className={`bg-white/95 dark:bg-gray-900/95 backdrop-blur-sm rounded-2xl shadow-xl border border-white/20 dark:border-gray-700/50 transition-all duration-300 ${
             isExpanded ? 'w-96' : 'w-72'
@@ -76,9 +74,9 @@ const CheckpointFloatingUI: React.FC<CheckpointFloatingUIProps> = ({
             <div className="flex items-center justify-between">
               <div className="flex items-center space-x-4">
                 <div className="relative">
-                  <div className="w-14 h-14 bg-gradient-to-br from-blue-500 to-purple-600 rounded-xl flex items-center justify-center shadow-lg">
+                  <div className="w-14 h-14 bg-gradient-to-br from-blue-500 to-purple-600 rounded-[50%] flex items-center justify-center shadow-lg">
                     <span className="text-white font-bold text-lg">
-                      {currentCheckpoint}
+                      {projectData.checkpoints.findIndex(cp => cp.id === currentCheckpoint) + 1}
                     </span>
                   </div>
                   {/* Progress ring */}
@@ -136,40 +134,14 @@ const CheckpointFloatingUI: React.FC<CheckpointFloatingUIProps> = ({
                     Current Checkpoint
                   </span>
                   <span className="text-xs bg-gradient-to-r from-blue-500 to-purple-600 text-white px-3 py-1 rounded-full font-medium">
-                    {currentCheckpoint} of {projectData.checkpoints.length}
+                    {projectData.checkpoints.findIndex(cp => cp.id === currentCheckpoint) + 1} of {projectData.checkpoints.length}
                   </span>
                 </div>
                 <p className="text-sm text-gray-600 dark:text-gray-400 mb-4 leading-relaxed">
                   {currentCheckpointData?.description}
                 </p>
                 
-                {/* Action Buttons */}
-                <div className="flex space-x-3">
-                  <button
-                    onClick={() => setShowRequirements(!showRequirements)}
-                    className="flex-1 px-4 py-2.5 text-sm bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-300 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700 transition-all duration-200 border border-gray-200 dark:border-gray-600 shadow-sm"
-                  >
-                    {showRequirements ? '👁️ Hide' : '📋 Show'} Requirements
-                  </button>
-                  <button
-                    onClick={onRunTests}
-                    disabled={isTestingInProgress}
-                    className={`flex-1 px-4 py-2.5 text-sm rounded-lg transition-all duration-200 font-medium shadow-sm ${
-                      isTestingInProgress
-                        ? 'bg-gray-400 text-gray-200 cursor-not-allowed'
-                        : 'bg-gradient-to-r from-green-500 to-emerald-600 text-white hover:from-green-600 hover:to-emerald-700 shadow-lg hover:shadow-green-500/25'
-                    }`}
-                  >
-                    {isTestingInProgress ? (
-                      <div className="flex items-center justify-center space-x-2">
-                        <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin"></div>
-                        <span>Testing...</span>
-                      </div>
-                    ) : (
-                      '🧪 Run Tests'
-                    )}
-                  </button>
-                </div>
+           
               </div>
 
               {/* Checkpoint Navigation */}
@@ -210,7 +182,7 @@ const CheckpointFloatingUI: React.FC<CheckpointFloatingUIProps> = ({
                                 ? 'bg-gradient-to-r from-blue-500 to-purple-600 text-white shadow-lg'
                                 : 'bg-gray-200 dark:bg-gray-600 text-gray-600 dark:text-gray-300'
                             }`}>
-                              {!canNavigate ? '🔒' : isCompleted ? '✓' : checkpoint.id}
+                              {!canNavigate ? '🔒' : isCompleted ? '✓' : '🕛'}
                             </div>
                             <div className="flex-1">
                               <h5 className="text-sm font-medium text-gray-900 dark:text-white">
@@ -252,7 +224,7 @@ const CheckpointFloatingUI: React.FC<CheckpointFloatingUIProps> = ({
 
       {/* Requirements Panel */}
       {showRequirements && currentCheckpointData && (
-        <div className="fixed top-6 left-[26rem] z-40 w-96 bg-white/95 dark:bg-gray-900/95 backdrop-blur-sm rounded-2xl shadow-xl border border-white/20 dark:border-gray-700/50">
+        <div className="fixed top-6 right-[26rem] z-40 w-96 bg-white/95 dark:bg-gray-900/95 backdrop-blur-sm rounded-2xl shadow-xl border border-white/20 dark:border-gray-700/50">
           <div className="p-5 border-b border-gray-100 dark:border-gray-700">
             <div className="flex items-center justify-between">
               <h3 className="font-semibold text-gray-900 dark:text-white text-lg">

@@ -6,7 +6,7 @@ const ResizableSidebar: FC<{
 }> = ({ children, minWidth = 200 }) => {
   // percentage width of sidebar between 15% and 25%
   const [percent, setPercent] = useState<number>(20);
-  const [open, setOpen] = useState<boolean>(true);
+  const [open, setOpen] = useState<boolean>(false);
   const [isDragging, setIsDragging] = useState<boolean>(false);
   const sidebarRef = useRef<HTMLDivElement>(null);
 

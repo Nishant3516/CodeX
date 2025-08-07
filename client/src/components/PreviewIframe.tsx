@@ -9,7 +9,7 @@ const PreviewIframe = forwardRef<HTMLIFrameElement, PreviewProps>(({ srcDoc }, r
     <iframe
       ref={ref}
       srcDoc={srcDoc}
-      className="w-full h-full bg-white dark:bg-gray-900"
+      className="w-full h-full bg-white "
       sandbox="allow-scripts allow-same-origin allow-forms allow-modals allow-popups"
     />
   );

@@ -1,5 +1,5 @@
 export interface TestCase {
-  testId: number;
+  testId: string;
   title: string;
   description: string;
   testCode: string;
@@ -11,13 +11,10 @@ export interface TestResult {
 }
 
 export interface Checkpoint {
-  id: number;
+  id: string;
   title: string;
   description: string;
   requirements: string[];
-  boilerplateCode: {
-    [filename: string]: string;
-  };
   tests: TestCase[];
 }
 
@@ -27,12 +24,13 @@ export interface ProjectData {
   description: string;
   requirements: string[];
   checkpoints: Checkpoint[];
+  boilerplateCode: Record<string, string>; // Optional, can be set during initialization
 }
 
 export interface CheckpointProgress {
-  checkpointId: number;
+  checkpointId: string;
   completed: boolean;
   testsResults: {
-    [testId: number]: TestResult;
+    [testId: string]: TestResult;
   };
 }

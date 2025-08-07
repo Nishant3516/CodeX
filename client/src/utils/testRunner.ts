@@ -16,33 +16,38 @@ export class TestRunner {
     }
 
     try {
+      // Safely construct the test function with proper escaping
+      const functionName = this.extractFunctionName(testCase.testCode);
       const testFunction = `
+        // Injected test code
         ${testCase.testCode}
         
-        try {
-          const result = ${this.extractFunctionName(testCase.testCode)}();
-          if (result && typeof result === 'object' && 'passed' in result) {
+        // Execute the test function
+        (function() {
+          try {
+            const result = ${functionName}();
+            if (result && typeof result === 'object' && 'passed' in result) {
+              window.parent.postMessage({
+                type: 'test-result',
+                testId: ${JSON.stringify(testCase.testId)},
+                result: result
+              }, '*');
+            } else {
+              window.parent.postMessage({
+                type: 'test-result',
+                testId: ${JSON.stringify(testCase.testId)},
+                result: { passed: false, message: 'Test function did not return a valid result object' }
+              }, '*');
+            }
+          } catch (error) {
             window.parent.postMessage({
               type: 'test-result',
-              testId: ${testCase.testId},
-              result: result
-            }, '*');
-          } else {
-            window.parent.postMessage({
-              type: 'test-result',
-              testId: ${testCase.testId},
-              result: { passed: false, message: 'Test function did not return a valid result object' }
+              testId: ${JSON.stringify(testCase.testId)},
+              result: { passed: false, message: 'Test execution error: ' + error.message }
             }, '*');
           }
-        } catch (error) {
-          window.parent.postMessage({
-            type: 'test-result',
-            testId: ${testCase.testId},
-            result: { passed: false, message: 'Test execution error: ' + error.message }
-          }, '*');
-        }
+        })();
       `;
-
       // Create a promise that resolves when we receive the test result
       return new Promise((resolve) => {
         const timeoutId = setTimeout(() => {
@@ -79,9 +84,9 @@ export class TestRunner {
     }
   }
 
-  async runAllTests(testCases: TestCase[]): Promise<{ [testId: number]: TestResult }> {
-    const results: { [testId: number]: TestResult } = {};
-    
+  async runAllTests(testCases: TestCase[]): Promise<{ [testId: string]: TestResult }> {
+    const results: { [testId: string]: TestResult } = {};
+    console.log("Running all tests...", testCases);
     // Check if iframe exists
     if (!this.iframe) {
       for (const testCase of testCases) {
@@ -98,6 +103,7 @@ export class TestRunner {
       await this.waitForIframeLoad();
     } catch (error) {
       // Don't return early, proceed with tests anyway
+      console.error('Error waiting for iframe load:', error);
     }
 
     for (const testCase of testCases) {
@@ -110,9 +116,22 @@ export class TestRunner {
   }
 
   private extractFunctionName(testCode: string): string {
-    // Extract function name from test code
-    const match = testCode.match(/function\s+(\w+)\s*\(/);
-    return match ? match[1] : 'testFunction';
+    // Extract function name from test code - support multiple patterns
+    
+    // Pattern 1: function functionName()
+    let match = testCode.match(/function\s+(\w+)\s*\(/);
+    if (match) return match[1];
+    
+    // Pattern 2: const functionName = function()
+    match = testCode.match(/(?:const|let|var)\s+(\w+)\s*=\s*function/);
+    if (match) return match[1];
+    
+    // Pattern 3: const functionName = () =>
+    match = testCode.match(/(?:const|let|var)\s+(\w+)\s*=\s*\(/);
+    if (match) return match[1];
+    
+    // Default fallback
+    return 'testFunction';
   }
 
   private async waitForIframeLoad(): Promise<void> {

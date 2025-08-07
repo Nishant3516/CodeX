@@ -10,6 +10,7 @@ type CodeEditorProps = {
   onChange: (value: string) => void;
   files?: string[];
   settings?: SettingsState;
+  allowDefaultContent?: boolean; // New prop to control default content behavior
 };
 
 // Enhanced CSS and JS snippets with linking examples
@@ -101,7 +102,7 @@ function myCustomFunction() {
   }
 };
 
-const CodeEditor: FC<CodeEditorProps> = ({ language, value, onChange, files = [], settings }) => {
+const CodeEditor: FC<CodeEditorProps> = ({ language, value, onChange, files = [], settings, allowDefaultContent = false }) => {
   const editorRef = useRef<monaco.editor.IStandaloneCodeEditor | null>(null);
   const monacoRef = useRef<typeof monaco | null>(null);
 
@@ -284,15 +285,15 @@ const CodeEditor: FC<CodeEditorProps> = ({ language, value, onChange, files = []
     });
   };
 
-  // Set default content if value is empty
+  // Set default content if value is empty and allowed
   useEffect(() => {
-    if (!value && language) {
+    if (!value && language && allowDefaultContent) {
       const defaultContent = getDefaultContent(language, files);
       if (defaultContent) {
         onChange(defaultContent);
       }
     }
-  }, [language, files, value, onChange]);
+  }, [language, files, value, onChange, allowDefaultContent]);
 
   return (
     <div className="h-full bg-[#1e1e1e]">
