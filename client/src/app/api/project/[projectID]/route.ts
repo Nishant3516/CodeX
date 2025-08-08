@@ -6,9 +6,9 @@ export async function GET(
 ) {
   try {
     const { projectID } = await params;
-    const apiUrl = process.env.API_URL;
+    const apiUrl = process.env.BACKEND_API_URL;
     const finalUrl = `${apiUrl}/v0/quests/${projectID}`;
-  
+    
     const res = await fetch(finalUrl, {
       headers: {
         "Content-Type": "application/json",
