@@ -1,6 +1,5 @@
 import { NextResponse } from "next/server";
 import { S3Client, PutObjectCommand } from "@aws-sdk/client-s3";
-import { v4 as uuidv4 } from "uuid";
 
 export const config = {
   api: {
@@ -42,7 +41,7 @@ export async function POST(request: Request) {
       s3Key = `projects/${sanitizedProjectName}/boilerplate.zip`;
     } else {
       // For test cases
-      const newFileName = `${sanitizedProjectName}-${uuidv4()}-${originalName}`;
+      const newFileName = `${sanitizedProjectName}}-${originalName}`;
       s3Key = `projects/${sanitizedProjectName}/test-cases/${newFileName}`;
     }
 
