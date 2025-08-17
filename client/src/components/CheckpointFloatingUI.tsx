@@ -61,7 +61,7 @@ const CheckpointFloatingUI: React.FC<CheckpointFloatingUIProps> = ({
       {/* Floating Progress Indicator */}
       <div className="fixed top-6 right-6 z-50">
         <div 
-          className={`bg-white/95 dark:bg-gray-900/95 backdrop-blur-sm rounded-2xl shadow-xl border border-white/20 dark:border-gray-700/50 transition-all duration-300`}
+          className={`bg-white/95 dark:bg-gray-900/95 backdrop-blur-sm rounded-2xl max-w-[40rem] shadow-xl border border-white/20 dark:border-gray-700/50 transition-all duration-300`}
           style={{ boxShadow: '0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04)' }}
         >
           {/* Header */}
