@@ -61,7 +61,7 @@ func New() Service {
 	if err != nil {
 		log.Fatalf("failed to initialize database: %v", err)
 	}
-	err = Seed()
+	// err = Seed()
 	return dbInstance
 }
 

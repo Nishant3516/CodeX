@@ -21,6 +21,11 @@ type AddQuestRequest struct {
 	Checkpoints    []CheckpointRequest `json:"checkpoints"`
 }
 
+type StartLabRequest struct {
+	LabID    string `json:"labId"`
+	Language string `json:"language"`
+}
+
 type CheckpointRequest struct {
 	Title        string   `json:"title"`
 	Description  string   `json:"description"`

@@ -13,12 +13,15 @@
     "@monaco-editor/react": "^4.7.0",
     "@types/jszip": "^3.4.0",
     "axios": "^1.11.0",
+    "framer-motion": "^12.23.12",
     "jszip": "^3.10.1",
+    "lucide-react": "^0.540.0",
     "monaco-editor": "^0.52.2",
     "next": "15.4.5",
     "prettier": "^3.6.2",
     "react": "19.1.0",
     "react-dom": "19.1.0",
+    "react-resizable-panels": "^3.0.4",
     "zustand": "^5.0.7"
   },
   "devDependencies": {

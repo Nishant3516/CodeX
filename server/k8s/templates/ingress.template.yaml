@@ -1,0 +1,38 @@
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: '{{.LabID}}-ingress'
+  namespace: devsarena
+  annotations:
+    # This annotation is needed for WebSocket connections to work properly
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "3600"
+    nginx.ingress.kubernetes.io/proxy-send-timeout: "3600"
+spec:
+  ingressClassName: nginx
+  rules:
+    - host: '{{.LabID}}.quest.arenas.devsarena.in'
+      http:
+        paths:
+          # WebSocket routes for runner service (must come first to avoid conflicts)
+          - path: /fs
+            pathType: Prefix
+            backend:
+              service:
+                name: '{{.LabID}}-service'
+                port:
+                  name: runner-fs
+          - path: /pty
+            pathType: Prefix
+            backend:
+              service:
+                name: '{{.LabID}}-service'
+                port:
+                  name: runner-pty
+          # Route for the Vite dev server on port 5173 (default route)
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: '{{.LabID}}-service'
+                port:
+                  name: app-vite-dev

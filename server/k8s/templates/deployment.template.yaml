@@ -1,0 +1,119 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: '{{.LabID}}-deployment'
+  namespace: devsarena
+  labels:
+    app: '{{.LabID}}'
+    language: '{{.Language}}'
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: '{{.LabID}}'
+  template:
+    metadata:
+      labels:
+        app: '{{.LabID}}'
+    spec:
+      volumes:
+        - name: workspace-volume
+          emptyDir: {}
+
+      initContainers:
+        - name: copy-s3-content
+          image: amazon/aws-cli:latest
+          command:
+            - /bin/sh
+            - -c
+            - |
+              echo 'S3 bucket: {{.S3Bucket}}' && echo 'S3 key: {{.S3Key}}' && aws s3 cp s3://{{.S3Bucket}}/{{.S3Key}} /workspace --recursive
+          env:
+            - name: AWS_ACCESS_KEY_ID
+              valueFrom:
+                secretKeyRef:
+                  name: aws-secrets
+                  key: AWS_ACCESS_KEY_ID
+            - name: AWS_SECRET_ACCESS_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: aws-secrets
+                  key: AWS_SECRET_ACCESS_KEY
+            - name: AWS_DEFAULT_REGION
+              value: "ap-south-1" # Change to your region
+          volumeMounts:
+            - name: workspace-volume
+              mountPath: /workspace
+
+      containers:
+        - name: app-container
+          image: krishnawyvern/devsarena-node-runtime
+          ports:
+            - name: user-app-vite # Port for Vite dev server
+              containerPort: 5173
+            - name: user-app-serve # Port for 'serve' package
+              containerPort: 3000
+          resources:
+            requests:
+              cpu: "100m"
+              memory: "128Mi"
+            limits:
+              cpu: "500m"
+              memory: "512Mi"
+          volumeMounts:
+            - name: workspace-volume
+              mountPath: /workspace
+          workingDir: /workspace
+          command: ["/bin/sh", "-c", "tail -f /dev/null"]
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+                - "ALL"
+
+        - name: runner-container
+          image: krishnawyvern/devsarena-runner-service
+          ports:
+            - name: fs-ws # WebSocket for file system events
+              containerPort: 8081
+            - name: pty-ws # WebSocket for the pseudo-terminal
+              containerPort: 8082
+          resources:
+            requests:
+              cpu: "100m"
+              memory: "128Mi"
+            limits:
+              cpu: "500m"
+              memory: "512Mi"
+          env:
+            - name: AWS_ACCESS_KEY_ID
+              valueFrom:
+                secretKeyRef:
+                  name: aws-secrets
+                  key: AWS_ACCESS_KEY_ID
+            - name: AWS_SECRET_ACCESS_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: aws-secrets
+                  key: AWS_SECRET_ACCESS_KEY
+            - name: AWS_DEFAULT_REGION
+              value: "ap-south-1" # Change to your region
+            - name: AWS_S3_BUCKET_NAME
+              valueFrom:
+                secretKeyRef:
+                  name: aws-secrets
+                  key: AWS_S3_BUCKET_NAME
+            - name: WORKSPACE_DIR
+              valueFrom:
+                secretKeyRef:
+                  name: aws-secrets
+                  key: WORKSPACE_DIR
+          volumeMounts:
+            - name: workspace-volume
+              mountPath: /workspace
+          workingDir: /workspace
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+                - "ALL"
