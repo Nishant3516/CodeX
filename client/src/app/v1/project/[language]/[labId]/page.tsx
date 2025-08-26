@@ -16,7 +16,6 @@ import { useFileSystem } from '@/hooks/useV1Lab';
 import { usePtyConnection } from '@/hooks/usePtyProbe';
 import { PLAYGROUND_OPTIONS } from '@/constants/playground';
 
-const FS_URL = "ws://test.quest.arenas.devsarena.in/fs";
 
 // Mock progress data
 const mockProgress = {
@@ -52,6 +51,7 @@ export default function V1ProjectPage() {
   const language = getParamString(params?.language) || 'html';
   const labId = getParamString(params?.labId) || 'test-lab'; // Use a default labId for testing
 
+  const FS_URL = `ws://${labId}.quest.arenas.devsarena.in/fs`;
 
   // State management - ALL useState calls MUST be at the top
   const [activeFile, setActiveFile] = useState<string | null>(null);
