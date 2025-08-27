@@ -37,17 +37,22 @@ const parseShortcut = (shortcut: string) => {
 const matchesShortcut = (event: KeyboardEvent, shortcut: string) => {
   const parsed = parseShortcut(shortcut);
   const isMac = navigator.platform.toLowerCase().includes('mac');
-  
-  // Handle Cmd on Mac vs Ctrl on Windows/Linux
-  const modifierKey = parsed.cmd || parsed.ctrl;
-  const hasModifier = isMac ? event.metaKey : event.ctrlKey;
-  
-  return (
-    event.key.toUpperCase() === parsed.key &&
-    hasModifier === modifierKey &&
-    event.shiftKey === parsed.shift &&
-    event.altKey === parsed.alt
-  );
+
+  // Check key
+  if (event.key.toUpperCase() !== parsed.key) return false;
+
+  // Check ctrl/cmd separately: on Mac, cmd maps to metaKey; on other OSes ctrlKey
+  if (parsed.cmd) {
+    if (!event.metaKey) return false;
+  } else if (parsed.ctrl) {
+    if (!event.ctrlKey) return false;
+  }
+
+  // Check alt and shift explicitly
+  if (parsed.alt !== event.altKey) return false;
+  if (parsed.shift !== event.shiftKey) return false;
+
+  return true;
 };
 
 export const useKeyboardShortcuts = (shortcuts: KeyboardShortcuts, handlers: ShortcutHandlers) => {
