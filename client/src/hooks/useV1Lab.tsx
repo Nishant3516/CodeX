@@ -16,6 +16,7 @@ import {
   FS_INITIALIZE_CLIENT,
 } from "../constants/FS_MessageTypes";
 import { buildFsUrl } from "@/lib/fs";
+import { useConnectionManager } from "./useConnectionManager";
 
 // Module-level cache to survive Fast Refresh / remounts.
 let globalQuestMetaCache: QuestMetaResponse | null = null;
@@ -67,6 +68,32 @@ export const useFileSystem = (
   const [fileContents, setFileContents] = useState<Record<string, string>>({});
   const [loading, setLoading] = useState(expectContainers); // Start loading if we expect containers
   const [error, setError] = useState<string | null>(null);
+
+  const connectionManager = useConnectionManager({
+    labId: params.labId,
+    language: params.language,
+    onServiceAvailable: () => {
+      console.log('File system service is now available');
+    },
+    onServiceUnavailable: () => {
+      console.log('File system service is starting up...');
+    }
+  });
+
+  // Update error and loading states based on connection manager
+  useEffect(() => {
+    if (connectionManager.error) {
+      setConnectionError(connectionManager.error);
+      setError(connectionManager.error);
+    }
+    if (connectionManager.loadingMessage) {
+      setError(connectionManager.loadingMessage);
+    }
+  }, [connectionManager.error, connectionManager.loadingMessage]);
+
+  // Expose tips information for UI components
+  const showTips = connectionManager.showTips;
+  const getLoadingTips = connectionManager.getLoadingTips;
 
   const pendingRequests = useRef<Set<string>>(new Set());
   const directoryCache = useRef<Record<string, FileInfo[]>>({});
@@ -166,22 +193,34 @@ export const useFileSystem = (
         setConnectionError(null);
 
         console.log("Connecting to filesystem...");
-        const response = await fsSocket.checkIfAvailable(socketUrl);
-        if (response != true) {
-          console.warn(
-            "Filesystem indicates missing project (404). Marking for provisioning."
-          );
-          setProvisionNeeded(true);
-          setConnectionError("Not Found");
-          setError("Workspace missing - provisioning required");
+
+        // Check service availability using centralized connection manager
+        const result = await connectionManager.checkServiceAvailability(socketUrl, 'file system');
+
+        if (!result.available) {
+          if (result.sslError) {
+            setConnectionError('SSL certificate verification failed. Please check your SSL configuration.');
+            setError('SSL certificate error - cannot connect securely');
+            setIsConnected(false);
+            setLoading(false);
+            return;
+          }
+
+          if (connectionManager.startAttempted) {
+            // Service is starting up, wait a bit more
+            setError('Development environment is starting up...');
+            await new Promise(resolve => setTimeout(resolve, 3000));
+            return;
+          }
+
+          setConnectionError('Unable to connect to file system service');
+          setError('Service unavailable - please try refreshing the page');
           setIsConnected(false);
           setLoading(false);
-          // disconnect any socket activity to avoid further network traffic
-          try {
-            fsSocket.disconnect();
-          } catch (_) {}
           return;
         }
+
+        // Service is available, now connect WebSocket
         await fsSocket.connect(socketUrl);
 
         if (!mounted) return;
@@ -234,61 +273,9 @@ export const useFileSystem = (
             ? err.message
             : String(errMsgRaw || "Connection failed")
         );
-        setError("Retrying connection...");
+        setError("Connection failed");
         setIsConnected(false);
-
-        let retryCount = 0;
-        const maxRetries = 20;
-        const retryDelay = 3000;
-
-        const retry = async () => {
-          while (
-            mounted &&
-            retryCount < maxRetries &&
-            !fsSocket.connected &&
-            !provisionNeeded
-          ) {
-            retryCount++;
-            console.log(`Retry attempt ${retryCount}/${maxRetries}`);
-            setError(`Retrying connection... (${retryCount}/${maxRetries})`);
-
-            await new Promise((resolve) => setTimeout(resolve, retryDelay));
-
-            if (fsSocket.connected) {
-              try {
-                console.log("FS reconnected, fetching metadata");
-                const questData: QuestMetaResponse = await fsSocket.sendMessage(
-                  FS_FETCH_QUEST_META,
-                  { path: "" },
-                  socketUrl
-                );
-                if (!mounted) return;
-
-                const tree = buildFileTree(questData.files);
-                setFileTree(tree);
-                directoryCache.current[""] = questData.files;
-                globalQuestMetaCache = questData;
-                initialized.current = true;
-                setIsConnected(true);
-                setConnectionError(null);
-                setError(null);
-                setLoading(false);
-                return;
-              } catch (e) {
-                console.error("Failed to fetch metadata after reconnect:", e);
-              }
-            }
-          }
-
-          if (mounted) {
-            setConnectionError("Unable to connect to file system service");
-            setError("Connection failed after multiple retries");
-            setIsConnected(false);
-            setLoading(false);
-          }
-        };
-
-        retry();
+        setLoading(false);
         return;
       } finally {
         if (mounted && isConnected) {
@@ -743,6 +730,8 @@ export const useFileSystem = (
     fileContents,
     loading,
     error,
+    showTips,
+    getLoadingTips,
     loadDirectory,
     loadFileContent,
     saveFile,

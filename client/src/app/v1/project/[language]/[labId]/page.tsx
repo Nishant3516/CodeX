@@ -76,6 +76,8 @@ export default function V1ProjectPage() {
     fileContents: serverFileContents,
     loading,
     error: fsError,
+    showTips: fsShowTips,
+    getLoadingTips: fsGetLoadingTips,
     loadDirectory,
     loadFileContent,
     saveFile,
@@ -86,7 +88,7 @@ export default function V1ProjectPage() {
   // filesystem hook may report that provisioning is needed via `provisionNeeded`
 
   // PTY readiness probe
-  const { isConnected: ptyConnected, error: ptyError, isConnecting: ptyConnecting, provisionNeeded: ptyProvisionNeeded } = usePtyConnection(labId);
+  const { isConnected: ptyConnected, error: ptyError, isConnecting: ptyConnecting, provisionNeeded: ptyProvisionNeeded, showTips: ptyShowTips, getLoadingTips: ptyGetLoadingTips } = usePtyConnection(labId, language);
 
   // Show loading screen until BOTH websockets are connected
   const bothConnected = isConnected && ptyConnected;
@@ -430,23 +432,31 @@ export default function V1ProjectPage() {
   // Get current file content (prioritize local edits over server)
   const currentFileContent = activeFile ? getCurrentFileContent(activeFile) : '';
 
+  // Combine tips from both hooks
+  const showTips = fsShowTips || ptyShowTips;
+  const getLoadingTips = useCallback(() => {
+    const fsTips = fsGetLoadingTips();
+    const ptyTips = ptyGetLoadingTips();
+    return [...fsTips, ...ptyTips];
+  }, [fsGetLoadingTips, ptyGetLoadingTips]);
+
   if (showLoading) {
     return (
       <LoadingScreen
         language={language}
         labId={labId}
         fsConnected={isConnected}
-  fsError={connectionError || fsError || undefined}
+        fsError={connectionError || fsError || undefined}
         ptyConnected={ptyConnected}
         ptyError={ptyError}
-  fsProvisionNeeded={Boolean(fsProvisionNeeded)}
-  ptyProvisionNeeded={ptyProvisionNeeded}
+        fsProvisionNeeded={Boolean(fsProvisionNeeded)}
+        ptyProvisionNeeded={ptyProvisionNeeded}
+        showTips={showTips}
+        getLoadingTips={getLoadingTips}
         onReady={() => { /* no-op: page gating handles transition */ }}
       />
     );
-  }
-
-  return (
+  }  return (
     <div className="h-screen w-screen bg-gray-900 overflow-hidden relative">
   {/* Debug Info removed - no top-left connection overlay per user request */}
       

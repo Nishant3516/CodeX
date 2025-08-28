@@ -1,8 +1,9 @@
 "use client";
 import { useEffect, useState, useRef } from 'react';
 import { buildPtyUrl } from '@/lib/pty';
+import { useConnectionManager } from './useConnectionManager';
 
-export function usePtyConnection(labId?: string) {
+export function usePtyConnection(labId?: string, language?: string) {
   const [isConnected, setIsConnected] = useState(false);
   const [error, setError] = useState<string | undefined>(undefined);
   const [provisionNeeded, setProvisionNeeded] = useState(false);
@@ -10,6 +11,18 @@ export function usePtyConnection(labId?: string) {
   const retryTimeoutRef = useRef<number | null>(null);
   const socketRef = useRef<WebSocket | null>(null);
   const mountedRef = useRef(true);
+
+  // Initialize connection manager outside useEffect
+  const connectionManager = labId ? useConnectionManager({
+    labId: labId,
+    language,
+    onServiceAvailable: () => {
+      console.log('Terminal service is now available');
+    },
+    onServiceUnavailable: () => {
+      console.log('Terminal service is starting up...');
+    }
+  }) : null;
 
   useEffect(() => {
     mountedRef.current = true;
@@ -25,29 +38,56 @@ export function usePtyConnection(labId?: string) {
   }, []);
 
   useEffect(() => {
-    if (!labId) {
+    if (!labId || !connectionManager) {
       setIsConnected(false);
       setError(undefined);
       setIsConnecting(false);
       return;
     }
 
-    let retryCount = 0;
-    const maxRetries = 30;
-    const baseDelay = 2000;
+    const url = buildPtyUrl(labId);
+    if (!url) {
+      setError('Invalid lab ID');
+      setIsConnecting(false);
+      return;
+    }
 
-    const connect = () => {
-      if (!mountedRef.current) return;
-      
-      setIsConnecting(true);
-      setError(undefined);
+    const initializeConnection = async () => {
+      console.log("Connecting to terminal...");
 
-      const url = buildPtyUrl(labId);
-      if (!url) {
-        setError('Invalid lab ID');
+      // Check service availability using centralized connection manager
+      const result = await connectionManager.checkServiceAvailability(url, 'terminal');
+
+      if (!result.available) {
+        if (result.sslError) {
+          setError('SSL certificate verification failed. Please check your SSL configuration.');
+          setIsConnected(false);
+          setIsConnecting(false);
+          return;
+        }
+
+        if (connectionManager.startAttempted) {
+          // Service is starting up, wait a bit more
+          setError('Terminal is starting up...');
+          await new Promise(resolve => setTimeout(resolve, 3000));
+          return;
+        }
+
+        setError('Terminal service unavailable - please try refreshing the page');
+        setIsConnected(false);
         setIsConnecting(false);
         return;
       }
+
+      // Service is available, now connect WebSocket
+      connectWebSocket(url);
+    };
+
+    const connectWebSocket = (url: string) => {
+      if (!mountedRef.current) return;
+
+      setIsConnecting(true);
+      setError(undefined);
 
       try {
         const socket = new WebSocket(url);
@@ -64,10 +104,9 @@ export function usePtyConnection(labId?: string) {
           setIsConnected(true);
           setError(undefined);
           setIsConnecting(false);
-          retryCount = 0;
         };
 
-        socket.onclose = () => {
+        socket.onclose = (event) => {
           if (!mountedRef.current) return;
           clearTimeout(connectTimeout);
           if (isConnected) {
@@ -78,7 +117,7 @@ export function usePtyConnection(labId?: string) {
           }
         };
 
-        socket.onerror = () => {
+        socket.onerror = (event) => {
           if (!mountedRef.current) return;
           clearTimeout(connectTimeout);
           handleRetry('Connection error');
@@ -91,9 +130,10 @@ export function usePtyConnection(labId?: string) {
 
     const handleRetry = (errorMsg: string) => {
       if (!mountedRef.current) return;
-      
+
       setIsConnected(false);
       setIsConnecting(false);
+
       // If 404-like error, mark provisioning needed and stop retrying
       if (/\b404\b|not\s*found/i.test(errorMsg)) {
         console.warn('PTY indicates missing project (404). Marking for provisioning.');
@@ -104,21 +144,36 @@ export function usePtyConnection(labId?: string) {
         return;
       }
 
-      if (retryCount >= maxRetries) {
-        setError(`Max retries exceeded. ${errorMsg}`);
+      // For SSL errors, don't retry
+      if (errorMsg.includes('SSL_CERTIFICATE_ERROR')) {
+        setError('SSL certificate verification failed. Please check your SSL configuration.');
         return;
       }
 
-      retryCount++;
-      const delay = Math.min(baseDelay * Math.pow(1.5, retryCount - 1), 30000);
-      setError(`${errorMsg}. Retrying in ${Math.ceil(delay / 1000)}s... (${retryCount}/${maxRetries})`);
-      
-      retryTimeoutRef.current = window.setTimeout(() => {
-        connect();
-      }, delay);
+      // Simple retry logic for other errors
+      const maxRetries = 5;
+      let retryCount = 0;
+
+      const retry = () => {
+        if (!mountedRef.current || retryCount >= maxRetries) {
+          setError(`Max retries exceeded. ${errorMsg}`);
+          return;
+        }
+
+        retryCount++;
+        const delay = 3000; // Fixed 3 second delay
+        setError(`${errorMsg}. Retrying in ${Math.ceil(delay / 1000)}s... (${retryCount}/${maxRetries})`);
+
+        retryTimeoutRef.current = window.setTimeout(() => {
+          const url = buildPtyUrl(labId!);
+          if (url) connectWebSocket(url);
+        }, delay);
+      };
+
+      retry();
     };
 
-    connect();
+    initializeConnection();
 
     return () => {
       if (retryTimeoutRef.current) {
@@ -132,6 +187,13 @@ export function usePtyConnection(labId?: string) {
     };
   }, [labId]);
 
-  return { isConnected, error, isConnecting, provisionNeeded };
+  return {
+    isConnected,
+    error,
+    isConnecting,
+    provisionNeeded,
+    showTips: connectionManager?.showTips || false,
+    getLoadingTips: connectionManager?.getLoadingTips || (() => [])
+  };
 }
 

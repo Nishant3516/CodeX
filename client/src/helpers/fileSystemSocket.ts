@@ -33,50 +33,56 @@ async sleep (ms: number): Promise<void> {
 }
 
 async  checkIfAvailable(url: string): Promise<boolean> {
-  url = url.replace('ws://', 'http://').replace('ws://', 'https://');
-  const maxRetries = 4;
-  const delays = [1000, 2000, 3000]; // Delay after 1st failure, and after 2nd failure
+  return new Promise((resolve, reject) => {
+    console.log(`Checking WebSocket availability: ${url}`);
 
-  for (let attempt = 1; attempt <= maxRetries; attempt++) {
-    try {
-      console.log(`Attempt #${attempt}: Checking URL: ${url}`);
-      const response = await fetch(url, { method: 'HEAD' });
+    const testSocket = new WebSocket(url);
+    const timeout = setTimeout(() => {
+      testSocket.close();
+      console.log('WebSocket availability check timed out');
+      resolve(false); // Timeout means service might be starting up
+    }, 3000);
 
-      // Case 1: Pod is initializing (503). This is a "good" sign.
-      if (response.status === 503 || response.status === 502) {
-        console.log(`Attempt #${attempt}: Received 503 Service Unavailable. Pod is loading. Returning true.`);
-        return true;
+    testSocket.onopen = () => {
+      clearTimeout(timeout);
+      console.log('WebSocket service is available');
+      testSocket.close();
+      resolve(true);
+    };
+
+    testSocket.onerror = (error) => {
+      clearTimeout(timeout);
+      console.error('WebSocket availability check failed:', error);
+
+      // Check if this is an SSL certificate error
+      const wsError = error as any;
+      if (wsError.target && wsError.target.url) {
+        const errorUrl = wsError.target.url;
+        if (errorUrl.startsWith('wss:') && (testSocket.readyState === WebSocket.CLOSED || testSocket.readyState === WebSocket.CLOSING)) {
+          console.log('SSL certificate error - service exists but has cert issues');
+          reject(new Error('SSL_CERTIFICATE_ERROR'));
+          return;
+        }
       }
-         if (response.status === 400) {
-        console.log(`Attempt #${attempt}: Received 400 Bad Request. Returning true as per custom logic.`);
-        return true;
+
+      // For other errors, assume service is not available (404-like scenario)
+      console.log('WebSocket service not available (404-like error)');
+      resolve(false);
+    };
+
+    testSocket.onclose = (event) => {
+      clearTimeout(timeout);
+      if (event.code === 1000) {
+        // Normal closure means service is available
+        console.log('WebSocket service available (normal closure)');
+        resolve(true);
+      } else {
+        // Abnormal closure - service might not be available
+        console.log(`WebSocket service not available (closed with code ${event.code})`);
+        resolve(false);
       }
-
-      // Case 2: Pod is ready and service is available (200-299).
-      if (response.ok) {
-        console.log(`Attempt #${attempt}: Success! Status is ${response.status}. Returning true.`);
-        return true;
-      }
-
-      // Case 3: NGINX returns 404 or another error. Treat as unavailable and retry.
-      console.log(`Attempt #${attempt}: Failed with status ${response.status}.`);
-
-    } catch (error) {
-      // Case 4: Network error (e.g., DNS resolution failed). Treat as unavailable and retry.
-      console.error(`Attempt #${attempt}: Network error during fetch.`, error);
-    }
-
-    // If this wasn't the last attempt, wait before trying again.
-    if (attempt < maxRetries) {
-      const delay = delays[attempt - 1];
-      console.log(`Waiting for ${delay / 1000}s before next attempt...`);
-      await this.sleep(delay);
-    }
-  }
-
-  // If the loop completes, all attempts have failed.
-  console.log('All attempts failed. The service is not available. Returning false.');
-  return false;
+    };
+  });
 }
 
   async connect(url: string): Promise<void> {
@@ -112,6 +118,20 @@ async  checkIfAvailable(url: string): Promise<boolean> {
         this.ws.onerror = (error) => {
           clearTimeout(timeout);
           console.error("FS WebSocket error:", error);
+
+          // Check if this is an SSL certificate error
+          const wsError = error as any;
+          if (wsError.target && wsError.target.url) {
+            const url = wsError.target.url;
+            if (url.startsWith('wss:') && (this.ws?.readyState === WebSocket.CLOSED || this.ws?.readyState === WebSocket.CLOSING)) {
+              console.error("SSL certificate error detected in WebSocket connection");
+              this.isConnecting = false;
+              this.connectionPromise = null;
+              reject(new Error('SSL_CERTIFICATE_ERROR'));
+              return;
+            }
+          }
+
           this.isConnecting = false;
           this.connectionPromise = null;
           reject(error);

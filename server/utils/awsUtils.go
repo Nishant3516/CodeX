@@ -41,6 +41,24 @@ func CopyS3Folder(sourceKey, destinationKey string) error {
 
 	log.Printf("Starting copy from s3://%s/%s to s3://%s/%s", bucket, sourceKey, bucket, destinationKey)
 
+	// Check if destination already exists
+	checkInput := &s3.ListObjectsV2Input{
+		Bucket:  &bucket,
+		Prefix:  &destinationKey,
+		MaxKeys: awsMethods.Int32(1), // Only need to check if at least one object exists
+	}
+
+	checkResult, err := aws.S3Client.ListObjectsV2(ctx, checkInput)
+	if err != nil {
+		return fmt.Errorf("failed to check destination existence: %w", err)
+	}
+
+	// If destination already has content, skip copying
+	if len(checkResult.Contents) > 0 {
+		log.Printf("Destination %s already exists, skipping copy operation", destinationKey)
+		return nil
+	}
+
 	listInput := &s3.ListObjectsV2Input{
 		Bucket: &bucket,
 		Prefix: &sourceKey,

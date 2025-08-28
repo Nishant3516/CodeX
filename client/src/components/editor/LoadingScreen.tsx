@@ -3,6 +3,7 @@ import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Terminal, Folder, Wifi, WifiOff, CheckCircle, Loader2, AlertCircle } from 'lucide-react';
 import { useRef } from 'react';
+import { LoadingTips } from '../LoadingTips';
 
 interface LoadingStepProps {
   icon: React.ReactNode;
@@ -70,6 +71,8 @@ export interface LoadingScreenProps {
   fsProvisionNeeded?: boolean;
   ptyProvisionNeeded?: boolean;
   onReady?: () => void;
+  showTips?: boolean;
+  getLoadingTips?: () => string[];
 }
 
 export function LoadingScreen({
@@ -81,7 +84,9 @@ export function LoadingScreen({
   ptyError,
   onReady,
   fsProvisionNeeded = false,    
-  ptyProvisionNeeded = false
+  ptyProvisionNeeded = false,
+  showTips = false,
+  getLoadingTips = () => []
 }: LoadingScreenProps) {
   const [dotCount, setDotCount] = useState(0);
   const [elapsedTime, setElapsedTime] = useState(0);
@@ -124,26 +129,9 @@ export function LoadingScreen({
     startTriggeredRef.current = true;
     setStartRequested(true);
 
-    (async () => {
-      try {
-        const res = await fetch('/api/project/start', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ language, labId })
-        });
-        if (res.ok) {
-          console.log('Recreated workspace', labId);
-        // //   // Reload page to restart connections after backend provisions
-        setTimeout(() => {
-          window.location.reload();
-        }, 2000);
-      } else {
-        console.warn('Start API returned', res.status);
-      }
-    } catch (err) {
-        console.error('Failed to recreate workspace:', err);
-      }
-    })();
+    // Note: Project start is now handled by the centralized connection managers
+    // This component just shows the loading state
+    console.log('Provisioning needed - connection managers will handle project start');
   }, [fsProvisionNeeded, ptyProvisionNeeded, language, labId]);
 
   const getFsStatus = () => {
@@ -249,22 +237,12 @@ export function LoadingScreen({
           )}
         </AnimatePresence>
 
-  
         {/* Loading tips */}
-        {!allReady && elapsedTime > 30 && (
-          <motion.div
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            className="mt-6 p-4 bg-blue-600/20 border border-blue-600/30 rounded-lg"
-          >
-            <div className="text-sm text-blue-300">
-              <div className="font-medium mb-1">Taking longer than usual?</div>
-              <div className="text-xs text-gray-400">
-                High traffic periods may increase startup time. Your environment is being prepared in the background.
-              </div>
-            </div>
-          </motion.div>
-        )}
+        <LoadingTips
+          showTips={showTips}
+          getTips={getLoadingTips}
+          className="mt-6"
+        />
       </div>
     </div>
   );

@@ -6,12 +6,16 @@ metadata:
   annotations:
     nginx.ingress.kubernetes.io/enable-cors: "true"
     cert-manager.io/cluster-issuer: "letsencrypt-prod" 
-    nginx.ingress.kubernetes.io/cors-allow-origin: "http://localhost:3000, https://staging.devsarena.in, https://devsarena.in"
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+    nginx.ingress.kubernetes.io/cors-allow-origin: "https://devsarena.in,https://staging.devsarena.in,http://localhost:3000,http://localhost:3001,http://127.0.0.1:3000,http://127.0.0.1:3001"
     nginx.ingress.kubernetes.io/cors-allow-methods: "GET, PUT, POST, DELETE, PATCH, OPTIONS, HEAD"
     nginx.ingress.kubernetes.io/cors-allow-headers: "DNT,User-Agent,X-Requested-With,If-Modified-Since,Cache-Control,Content-Type,Range"
     # This annotation is needed for WebSocket connections to work properly
     nginx.ingress.kubernetes.io/proxy-read-timeout: "3600"
     nginx.ingress.kubernetes.io/proxy-send-timeout: "3600"
+    # WebSocket specific settings for long-running connections
+    nginx.ingress.kubernetes.io/proxy-connect-timeout: "60"
+    nginx.ingress.kubernetes.io/proxy-next-upstream-timeout: "30"
 spec:
   ingressClassName: nginx
   tls:
