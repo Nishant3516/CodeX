@@ -59,17 +59,10 @@ export function usePtyConnection(labId?: string, language?: string) {
       const result = await connectionManager.checkServiceAvailability(url, 'terminal');
 
       if (!result.available) {
-        if (result.sslError) {
-          setError('SSL certificate verification failed. Please check your SSL configuration.');
-          setIsConnected(false);
-          setIsConnecting(false);
-          return;
-        }
-
         if (connectionManager.startAttempted) {
           // Service is starting up, wait a bit more
           setError('Terminal is starting up...');
-          await new Promise(resolve => setTimeout(resolve, 3000));
+          await new Promise(resolve => setTimeout(resolve, 5000)); // Increased from 3 to 5 seconds
           return;
         }
 
@@ -144,14 +137,8 @@ export function usePtyConnection(labId?: string, language?: string) {
         return;
       }
 
-      // For SSL errors, don't retry
-      if (errorMsg.includes('SSL_CERTIFICATE_ERROR')) {
-        setError('SSL certificate verification failed. Please check your SSL configuration.');
-        return;
-      }
-
-      // Simple retry logic for other errors
-      const maxRetries = 5;
+      // Improved retry logic for other errors
+      const maxRetries = 8; // Increased from 5 to 8
       let retryCount = 0;
 
       const retry = () => {
@@ -161,7 +148,8 @@ export function usePtyConnection(labId?: string, language?: string) {
         }
 
         retryCount++;
-        const delay = 3000; // Fixed 3 second delay
+        const baseDelay = 4000; // Increased from 3 to 4 seconds
+        const delay = baseDelay + (retryCount * 1000); // Progressive delay
         setError(`${errorMsg}. Retrying in ${Math.ceil(delay / 1000)}s... (${retryCount}/${maxRetries})`);
 
         retryTimeoutRef.current = window.setTimeout(() => {

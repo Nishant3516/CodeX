@@ -54,17 +54,6 @@ async  checkIfAvailable(url: string): Promise<boolean> {
       clearTimeout(timeout);
       console.error('WebSocket availability check failed:', error);
 
-      // Check if this is an SSL certificate error
-      const wsError = error as any;
-      if (wsError.target && wsError.target.url) {
-        const errorUrl = wsError.target.url;
-        if (errorUrl.startsWith('wss:') && (testSocket.readyState === WebSocket.CLOSED || testSocket.readyState === WebSocket.CLOSING)) {
-          console.log('SSL certificate error - service exists but has cert issues');
-          reject(new Error('SSL_CERTIFICATE_ERROR'));
-          return;
-        }
-      }
-
       // For other errors, assume service is not available (404-like scenario)
       console.log('WebSocket service not available (404-like error)');
       resolve(false);
@@ -118,19 +107,6 @@ async  checkIfAvailable(url: string): Promise<boolean> {
         this.ws.onerror = (error) => {
           clearTimeout(timeout);
           console.error("FS WebSocket error:", error);
-
-          // Check if this is an SSL certificate error
-          const wsError = error as any;
-          if (wsError.target && wsError.target.url) {
-            const url = wsError.target.url;
-            if (url.startsWith('wss:') && (this.ws?.readyState === WebSocket.CLOSED || this.ws?.readyState === WebSocket.CLOSING)) {
-              console.error("SSL certificate error detected in WebSocket connection");
-              this.isConnecting = false;
-              this.connectionPromise = null;
-              reject(new Error('SSL_CERTIFICATE_ERROR'));
-              return;
-            }
-          }
 
           this.isConnecting = false;
           this.connectionPromise = null;

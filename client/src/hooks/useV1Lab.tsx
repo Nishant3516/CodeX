@@ -198,18 +198,10 @@ export const useFileSystem = (
         const result = await connectionManager.checkServiceAvailability(socketUrl, 'file system');
 
         if (!result.available) {
-          if (result.sslError) {
-            setConnectionError('SSL certificate verification failed. Please check your SSL configuration.');
-            setError('SSL certificate error - cannot connect securely');
-            setIsConnected(false);
-            setLoading(false);
-            return;
-          }
-
           if (connectionManager.startAttempted) {
             // Service is starting up, wait a bit more
             setError('Development environment is starting up...');
-            await new Promise(resolve => setTimeout(resolve, 3000));
+            await new Promise(resolve => setTimeout(resolve, 5000)); // Increased from 3 to 5 seconds
             return;
           }
 

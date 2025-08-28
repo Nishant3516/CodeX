@@ -9,7 +9,6 @@ interface ProjectStartParams {
 interface ConnectionCheckResult {
   available: boolean;
   error?: string;
-  sslError?: boolean;
 }
 
 interface UseConnectionManagerOptions {
@@ -31,16 +30,27 @@ export function useConnectionManager({
   const [error, setError] = useState<string | null>(null);
   const [showTips, setShowTips] = useState(false);
   const [connectionStartTime, setConnectionStartTime] = useState<number | null>(null);
+  const [retryCount, setRetryCount] = useState(0);
+  const maxRetries = 3; // Increased from implicit 1 to 3 retries
 
   const startProject = useCallback(async (): Promise<boolean> => {
-    if (startAttempted) {
-      return false; // Already attempted
+    if (startAttempted && retryCount >= maxRetries) {
+      return false; // Already attempted max retries
     }
 
     setStartAttempted(true);
     setIsStartingProject(true);
     setError(null);
-    setLoadingMessage('Starting your development environment...');
+
+    const attemptNumber = retryCount + 1;
+    const messages = [
+      '🚀 Initializing your development environment...',
+      '🔧 Setting up your personalized workspace...',
+      '⚡ Preparing your coding environment...',
+      '📦 Installing necessary tools and dependencies...'
+    ];
+
+    setLoadingMessage(messages[Math.min(attemptNumber - 1, messages.length - 1)]);
 
     try {
       const requestBody: any = { labId };
@@ -48,16 +58,24 @@ export function useConnectionManager({
         requestBody.language = language;
       }
 
+      // Increase timeout for initial requests
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 15000); // 15 seconds instead of default
+
       const response = await fetch('/api/project/start', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify(requestBody)
+        body: JSON.stringify(requestBody),
+        signal: controller.signal
       });
 
+      clearTimeout(timeoutId);
+
       if (response.ok) {
-        setLoadingMessage('Development environment ready! Refreshing page...');
+        setLoadingMessage('🎉 Development environment ready! Refreshing page...');
+        setRetryCount(0); // Reset retry count on success
 
         // Auto-refresh the page after successful project start
         setTimeout(() => {
@@ -70,15 +88,28 @@ export function useConnectionManager({
       } else {
         const errorData = await response.json().catch(() => ({ error: 'Unknown error' }));
         const errorMessage = errorData.error || `HTTP ${response.status}: ${response.statusText}`;
+
+        // Check if project already exists (don't retry in that case)
+        if (response.status === 409 || errorMessage.includes('already exists')) {
+          setError('Project already exists and is ready to use!');
+          setLoadingMessage('');
+          setRetryCount(0);
+          return true; // Consider this a success
+        }
+
         throw new Error(`Failed to start project: ${errorMessage}`);
       }
     } catch (apiError: any) {
       console.error('Error starting project:', apiError);
 
+      setRetryCount(prev => prev + 1);
+
       // Provide user-friendly error messages
       let userFriendlyMessage = 'Unable to start development environment. ';
 
-      if (apiError.message?.includes('language is required')) {
+      if (apiError.name === 'AbortError') {
+        userFriendlyMessage = `Request timed out. ${retryCount < maxRetries - 1 ? 'Retrying...' : 'Please try again later.'}`;
+      } else if (apiError.message?.includes('language is required')) {
         userFriendlyMessage += 'Please ensure the project language is properly configured.';
       } else if (apiError.message?.includes('network') || apiError.message?.includes('fetch')) {
         userFriendlyMessage += 'Please check your internet connection and try again.';
@@ -90,12 +121,24 @@ export function useConnectionManager({
         userFriendlyMessage += 'Please try refreshing the page or contact support if this persists.';
       }
 
-      setError(userFriendlyMessage);
-      setIsStartingProject(false);
-      setStartAttempted(false); // Allow retry on error
+      // If we haven't exceeded max retries, show retry message
+      if (retryCount < maxRetries - 1) {
+        userFriendlyMessage += ` (Attempt ${attemptNumber}/${maxRetries})`;
+        setLoadingMessage(`Retrying in a few seconds... (${retryCount}/${maxRetries})`);
+        
+        // Auto-retry after a delay
+        setTimeout(() => {
+          setStartAttempted(false);
+          setIsStartingProject(false);
+        }, 5000);
+      } else {
+        setError(userFriendlyMessage);
+        setIsStartingProject(false);
+      }
+
       return false;
     }
-  }, [labId, language, startAttempted]);
+  }, [labId, language, startAttempted, retryCount, maxRetries]);
 
   const checkServiceAvailability = useCallback(async (
     serviceUrl: string,
@@ -104,70 +147,74 @@ export function useConnectionManager({
     setConnectionStartTime(Date.now());
     setShowTips(false);
 
-    // Show tips after 15 seconds
+    // Show tips after 20 seconds (increased from 15)
     const tipsTimeout = setTimeout(() => {
       setShowTips(true);
-    }, 15000);
+    }, 20000);
 
     try {
-      setLoadingMessage(`Connecting to ${serviceName}...`);
+      const messages = [
+        `🔍 Connecting to ${serviceName}...`,
+        `⏳ Establishing connection to ${serviceName}...`,
+        `⚡ Almost there, connecting to ${serviceName}...`,
+        `🎯 Finalizing connection to ${serviceName}...`
+      ];
 
-      // Direct WebSocket availability check
+      let messageIndex = 0;
+      const messageInterval = setInterval(() => {
+        messageIndex = (messageIndex + 1) % messages.length;
+        setLoadingMessage(messages[messageIndex]);
+      }, 4000);
+
+      // Direct WebSocket availability check with longer timeout
       const result = await new Promise<ConnectionCheckResult>((resolve) => {
         const testSocket = new WebSocket(serviceUrl);
         const timeout = setTimeout(() => {
           testSocket.close();
-          resolve({ available: false, error: 'Connection timeout' });
-        }, 3000);
+          resolve({ available: false, error: 'Connection timeout - service may be starting up' });
+        }, 8000); // Increased from 3 seconds to 8 seconds
 
         testSocket.onopen = () => {
           clearTimeout(timeout);
-          testSocket.close();
+          clearInterval(messageInterval);
           resolve({ available: true });
         };
 
         testSocket.onerror = (error) => {
           clearTimeout(timeout);
-          const wsError = error as any;
-          if (wsError.target && wsError.target.url) {
-            const errorUrl = wsError.target.url;
-            if (errorUrl.startsWith('wss:') && (testSocket.readyState === WebSocket.CLOSED || testSocket.readyState === WebSocket.CLOSING)) {
-              resolve({ available: false, sslError: true, error: 'SSL certificate error' });
-            }
-          }
-          resolve({ available: false, error: 'Connection failed' });
+          clearInterval(messageInterval);
+          resolve({ available: false, error: 'Connection failed - service may be starting up' });
         };
 
         testSocket.onclose = (event) => {
           clearTimeout(timeout);
+          clearInterval(messageInterval);
           if (event.code === 1000) {
             resolve({ available: true });
           } else {
-            resolve({ available: false, error: `Connection closed with code ${event.code}` });
+            resolve({ available: false, error: `Connection closed - service may be starting up` });
           }
         };
       });
 
       clearTimeout(tipsTimeout);
+      clearInterval(messageInterval);
       setShowTips(false);
       setConnectionStartTime(null);
 
       if (result.available) {
-        setLoadingMessage('');
+        setLoadingMessage(`✅ Connected to ${serviceName} successfully!`);
         onServiceAvailable?.();
-        return result;
-      } else if (result.sslError) {
-        setError('SSL certificate verification failed. Please check your SSL configuration.');
         return result;
       } else {
         // Service not available - try to start it
         const started = await startProject();
         if (started) {
-          // Wait a bit for the service to start up
-          setLoadingMessage('Waiting for services to start...');
-          await new Promise(resolve => setTimeout(resolve, 2000));
+          // Wait longer for the service to start up
+          setLoadingMessage('⏱️ Waiting for services to fully start...');
+          await new Promise(resolve => setTimeout(resolve, 5000)); // Increased from 2 to 5 seconds
           onServiceUnavailable?.();
-          return { available: false, error: 'Service starting up' };
+          return { available: false, error: 'Service is starting up...' };
         } else {
           return result;
         }
@@ -177,10 +224,6 @@ export function useConnectionManager({
       setShowTips(false);
       setConnectionStartTime(null);
 
-      if (error.message === 'SSL_CERTIFICATE_ERROR') {
-        setError('SSL certificate verification failed. Please check your SSL configuration.');
-        return { available: false, sslError: true, error: error.message };
-      }
       return { available: false, error: error.message };
     }
   }, [startProject, onServiceAvailable, onServiceUnavailable]);
