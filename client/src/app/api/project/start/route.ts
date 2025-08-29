@@ -13,18 +13,22 @@ export async function POST(request: Request) {
     const url = `${backend}/v0/playground`;
 
     // Proxy the request to backend. Backend will generate labId and return data.
-    const res = await fetch(url, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ language, labId })
-    });
+    // const res = await fetch(url, {
+    //   method: 'POST',
+    //   headers: { 'Content-Type': 'application/json' },
+    //   body: JSON.stringify({ language, labId })
+    // });
     
- 
+    return NextResponse.json({
 
-    return NextResponse.json( {
-      success:true,
-      labId
-    }, { status: 200 });
+      success:false,
+      message: 'Failed to start playground'
+    })
+
+    // return NextResponse.json( {
+    //   success:true,
+    //   labId
+    // }, { status: 200 });
   } catch (err) {
     console.error('Start proxy error:', err);
     return NextResponse.json({ error: 'Internal error' }, { status: 500 });
