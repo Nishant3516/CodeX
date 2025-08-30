@@ -4,7 +4,9 @@ import (
 	"context"
 	"fmt"
 	"lms_v0/internal/aws"
+	"lms_v0/internal/redis"
 	"lms_v0/internal/server"
+	"lms_v0/utils"
 	"log"
 	"net/http"
 	"os/signal"
@@ -40,6 +42,12 @@ func gracefulShutdown(apiServer *http.Server, done chan bool) {
 func main() {
 	// Initialize AWS clients
 	aws.InitAWS()
+	redis.InitRedis()
+	utils.InitRedisUtils(redis.RedisClient, redis.Context)
+
+	// Initialize Redis queues and hash maps
+	utils.RedisUtilsInstance.CreateLabProgressQueueIfNotExists()
+
 	server := server.NewServer()
 
 	done := make(chan bool, 1)

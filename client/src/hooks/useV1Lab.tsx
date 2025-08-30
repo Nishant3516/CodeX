@@ -74,9 +74,14 @@ export const useFileSystem = (
     language: params.language,
     onServiceAvailable: () => {
       console.log('File system service is now available');
+      setIsConnected(true);
+      setConnectionError(null);
+      setProvisionNeeded(false);
     },
     onServiceUnavailable: () => {
       console.log('File system service is starting up...');
+      setIsConnected(false);
+      setConnectionError('File system service is starting up...');
     }
   });
 

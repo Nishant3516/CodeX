@@ -4,8 +4,10 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"lms_v0/utils"
 	"log"
 	"text/template"
+	"time"
 
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
@@ -36,6 +38,13 @@ type SpinDownParams struct {
 // SpinUpPodWithLanguage orchestrates the creation of all necessary K8s resources.
 func SpinUpPodWithLanguage(params SpinUpParams) error {
 	log.Printf("Starting to spin up resources for LabID: %s, S3Bucket: %s, S3Key: %s", params.LabID, params.S3Bucket, params.S3Key)
+	progress := utils.LabProgressEntry{
+		Timestamp:   time.Now().Unix(),
+		Status:      utils.Booting,
+		Message:     "Starting to spin up resources",
+		ServiceName: utils.SERVER_SERVICE,
+	}
+	utils.RedisUtilsInstance.UpdateLabInstanceProgress(params.LabID, progress)
 
 	if params.ShouldCreateNamespace {
 		if err := CreateNamespaceFromYamlIfDoesNotExists(params); err != nil {
@@ -77,9 +86,7 @@ func CreateNamespaceFromYamlIfDoesNotExists(params SpinUpParams) error {
 	if err != nil {
 		return fmt.Errorf("error parsing template file %s: %w", yamlFilePath, err)
 	}
-	// Note: Your namespace template used Helm syntax, this uses Go's.
-	// You might need to adjust the template file itself.
-	// Assuming a simple template: apiVersion: v1, kind: Namespace, metadata: { name: {{.Namespace}} }
+
 	if err := tmpl.Execute(&processedYaml, params); err != nil {
 		return fmt.Errorf("error executing template: %w", err)
 	}
@@ -91,6 +98,18 @@ func CreateNamespaceFromYamlIfDoesNotExists(params SpinUpParams) error {
 
 	log.Printf("Creating namespace '%s'", params.Namespace)
 	_, err = ClientSet.CoreV1().Namespaces().Create(context.TODO(), &ns, metav1.CreateOptions{})
+	if err != nil {
+		return err
+	}
+
+	// Update progress for namespace creation
+	progress := utils.LabProgressEntry{
+		Timestamp:   time.Now().Unix(),
+		Status:      utils.Booting,
+		Message:     fmt.Sprintf("Namespace '%s' created successfully", params.Namespace),
+		ServiceName: utils.SERVER_SERVICE,
+	}
+	utils.RedisUtilsInstance.UpdateLabInstanceProgress(params.LabID, progress)
 	return err
 }
 
@@ -123,6 +142,18 @@ func CreateDeploymentFromYamlIfDoesNotExists(params SpinUpParams) error {
 
 	log.Printf("Creating deployment '%s'", deployment.Name)
 	_, err = ClientSet.AppsV1().Deployments(params.Namespace).Create(context.TODO(), &deployment, metav1.CreateOptions{})
+	if err != nil {
+		return err
+	}
+
+	// Update progress for deployment creation
+	progress := utils.LabProgressEntry{
+		Timestamp:   time.Now().Unix(),
+		Status:      utils.Booting,
+		Message:     fmt.Sprintf("Deployment '%s' created successfully", deployment.Name),
+		ServiceName: utils.SERVER_SERVICE,
+	}
+	utils.RedisUtilsInstance.UpdateLabInstanceProgress(params.LabID, progress)
 	return err
 }
 
@@ -155,6 +186,18 @@ func CreateServiceFromYamlIfDoesNotExists(params SpinUpParams) error {
 
 	log.Printf("Creating service '%s'", service.Name)
 	_, err = ClientSet.CoreV1().Services(params.Namespace).Create(context.TODO(), &service, metav1.CreateOptions{})
+	if err != nil {
+		return err
+	}
+
+	// Update progress for service creation
+	progress := utils.LabProgressEntry{
+		Timestamp:   time.Now().Unix(),
+		Status:      utils.Booting,
+		Message:     fmt.Sprintf("Service '%s' created successfully", service.Name),
+		ServiceName: utils.SERVER_SERVICE,
+	}
+	utils.RedisUtilsInstance.UpdateLabInstanceProgress(params.LabID, progress)
 	return err
 }
 
@@ -187,6 +230,27 @@ func CreateIngressFromYamlIfDoesNotExists(params SpinUpParams) error {
 
 	log.Printf("Creating ingress '%s'", ingress.Name)
 	_, err = ClientSet.NetworkingV1().Ingresses(params.Namespace).Create(context.TODO(), &ingress, metav1.CreateOptions{})
+	if err != nil {
+		return err
+	}
+
+	// Update progress for ingress creation
+	progress := utils.LabProgressEntry{
+		Timestamp:   time.Now().Unix(),
+		Status:      utils.Booting,
+		Message:     fmt.Sprintf("Ingress '%s' created successfully", ingress.Name),
+		ServiceName: utils.SERVER_SERVICE,
+	}
+	utils.RedisUtilsInstance.UpdateLabInstanceProgress(params.LabID, progress)
+
+	// Update progress for SSL certificate request
+	sslProgress := utils.LabProgressEntry{
+		Timestamp:   time.Now().Unix(),
+		Status:      utils.Booting,
+		Message:     "SSL certificate requested via Let's Encrypt",
+		ServiceName: utils.SSL_SERVICE,
+	}
+	utils.RedisUtilsInstance.UpdateLabInstanceProgress(params.LabID, sslProgress)
 	return err
 }
 

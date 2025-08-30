@@ -59,7 +59,7 @@ export default function PlaygroundPage() {
       // Redirect to the project page
       setTimeout(() => {
         window.location.href = `/v1/project/${language}/${labId}`;
-      }, 10000);
+      }, 5000);
     } catch (e) {
       console.error(e);
       alert("Failed to start lab. Please try again.");

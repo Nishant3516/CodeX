@@ -21,6 +21,7 @@ func InitK8sClient() error {
 	if err != nil {
 		return err
 	}
+
 	KubeConfig = filepath.Join(homeDir, ".kube", "config")
 	config, err := clientcmd.BuildConfigFromFlags("", KubeConfig)
 	if err != nil {
@@ -47,5 +48,9 @@ func InitK8sInCluster() error {
 	}
 	var err error
 	ClientSet, err = kubernetes.NewForConfig(cfg)
-	return err
+	if err != nil {
+		return err
+	}
+
+	return nil
 }

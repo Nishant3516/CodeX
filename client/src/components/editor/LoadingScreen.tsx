@@ -1,9 +1,10 @@
 "use client";
 import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Terminal, Folder, Wifi, WifiOff, CheckCircle, Loader2, AlertCircle } from 'lucide-react';
-import { useRef } from 'react';
+import { Terminal, Folder, CheckCircle, Loader2, AlertCircle } from 'lucide-react';
 import { LoadingTips } from '../LoadingTips';
+import { useLabProgress } from '../../hooks/useLabProgress';
+import { useSimpleConnections } from '../../hooks/useSimpleConnections';
 
 interface LoadingStepProps {
   icon: React.ReactNode;
@@ -64,12 +65,6 @@ function LoadingStep({ icon, label, status, message }: LoadingStepProps) {
 export interface LoadingScreenProps {
   language: string;
   labId: string;
-  fsConnected: boolean;
-  fsError?: string;
-  ptyConnected: boolean;
-  ptyError?: string;
-  fsProvisionNeeded?: boolean;
-  ptyProvisionNeeded?: boolean;
   onReady?: () => void;
   showTips?: boolean;
   getLoadingTips?: () => string[];
@@ -78,20 +73,12 @@ export interface LoadingScreenProps {
 export function LoadingScreen({
   language,
   labId,
-  fsConnected,
-  fsError,
-  ptyConnected,
-  ptyError,
   onReady,
-  fsProvisionNeeded = false,    
-  ptyProvisionNeeded = false,
   showTips = false,
   getLoadingTips = () => []
 }: LoadingScreenProps) {
   const [dotCount, setDotCount] = useState(0);
   const [elapsedTime, setElapsedTime] = useState(0);
-  const startTriggeredRef = useRef(false);
-  const [startRequested, setStartRequested] = useState(false);
 
   // Animated dots for loading text
   useEffect(() => {
@@ -110,8 +97,32 @@ export function LoadingScreen({
     return () => clearInterval(interval);
   }, []);
 
+  // Use the lab progress hook first to get service status
+  const { 
+    data: progressData, 
+    loading: progressLoading, 
+    progressLogs, 
+    status: labStatus, 
+    fsActive, 
+    ptyActive 
+  } = useLabProgress({ labId, language });
+
+  // Use the simplified connections hook with service status
+  const {
+    fsConnected,
+    ptyConnected,
+    fsError,
+    ptyError,
+    isReady
+  } = useSimpleConnections({
+    labId,
+    language,
+    fsActive,
+    ptyActive
+  });
+
   // Check if all services are ready
-  const allReady = fsConnected && ptyConnected;
+  const allReady = isReady && fsConnected && ptyConnected;
 
   useEffect(() => {
     if (allReady && onReady) {
@@ -121,26 +132,15 @@ export function LoadingScreen({
     }
   }, [allReady, onReady]);
 
-  // If either FS or PTY reports a 404-like error, trigger a background start
-  useEffect(() => {
-    if (startTriggeredRef.current) return;
-    // If either hook flagged provisioning needed, trigger start
-    if (!fsProvisionNeeded && !ptyProvisionNeeded) return;
-    startTriggeredRef.current = true;
-    setStartRequested(true);
-
-    // Note: Project start is now handled by the centralized connection managers
-    // This component just shows the loading state
-    console.log('Provisioning needed - connection managers will handle project start');
-  }, [fsProvisionNeeded, ptyProvisionNeeded, language, labId]);
-
   const getFsStatus = () => {
+    if (!fsActive) return 'loading';
     if (fsError) return 'error';
     if (fsConnected) return 'success';
     return 'loading';
   };
 
   const getPtyStatus = () => {
+    if (!ptyActive) return 'loading';
     if (ptyError) return 'error';
     if (ptyConnected) return 'success';
     return 'loading';
@@ -151,6 +151,13 @@ export function LoadingScreen({
     const minutes = Math.floor(seconds / 60);
     const remainingSeconds = seconds % 60;
     return `${minutes}m ${remainingSeconds}s`;
+  };
+
+  const getStatusMessage = () => {
+    if (progressLoading) return 'Checking lab status...';
+    if (!fsActive || !ptyActive) return 'Services are starting up...';
+    if (fsActive && ptyActive && !allReady) return 'Connecting to services...';
+    return 'Environment ready!';
   };
 
   return (
@@ -169,7 +176,7 @@ export function LoadingScreen({
             Booting Environment
           </h1>
           <p className="text-gray-400">
-            Setting up your {language} workspace{'.'.repeat(dotCount + 1)}
+            {getStatusMessage()}{'.'.repeat(dotCount + 1)}
           </p>
           <div className="text-sm text-gray-500 mt-2">
             Lab ID: {labId} • {formatTime(elapsedTime)}
@@ -187,16 +194,35 @@ export function LoadingScreen({
             icon={<Folder className="w-5 h-5 text-purple-400" />}
             label="File System"
             status={getFsStatus()}
-            message={fsError || (fsConnected ? 'Connected' : 'Connecting to workspace...')}
+            message={fsError || (fsConnected ? 'Connected' : fsActive ? 'Service ready, connecting...' : 'Starting service...')}
           />
           
           <LoadingStep
             icon={<Terminal className="w-5 h-5 text-blue-400" />}
             label="Terminal Service"
             status={getPtyStatus()}
-            message={ptyError || (ptyConnected ? 'Ready' : 'Starting shell environment...')}
+            message={ptyError || (ptyConnected ? 'Ready' : ptyActive ? 'Service ready, connecting...' : 'Starting service...')}
           />
         </motion.div>
+
+        {/* Progress Logs */}
+        {progressLogs && progressLogs.length > 0 && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            transition={{ delay: 0.3 }}
+            className="mb-6"
+          >
+            <h3 className="text-sm font-medium text-gray-300 mb-3">Progress Logs</h3>
+            <div className="max-h-32 overflow-y-auto space-y-2">
+              {progressLogs.slice(-5).map((log: any, index: number) => (
+                <div key={index} className="text-xs text-gray-400 bg-gray-800/30 p-2 rounded">
+                  <span className="font-medium text-gray-300">{log.ServiceName}:</span> {log.Message}
+                </div>
+              ))}
+            </div>
+          </motion.div>
+        )}
 
         {/* Progress Indicator */}
         <motion.div

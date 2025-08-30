@@ -4,6 +4,7 @@ import (
 	"context"
 	"log"
 	"net/http"
+	"os"
 	"time"
 )
 
@@ -18,11 +19,12 @@ var (
 func main() {
 	ctx := context.Background()
 
+	// Initialize Redis first
+	InitRedis()
+
 	if err := InitWorkspaceDir(); err != nil {
 		log.Fatal("Failed to initialize workspace:", err)
 	}
-
-	startS3BatchProcessor()
 
 	fsMux := http.NewServeMux()
 	manager := NewFSManager(ctx)
@@ -34,6 +36,14 @@ func main() {
 	})
 
 	log.Println("File system service starting on :8081")
+	labId := os.Getenv("LAB_ID")
+	UpdateLabInstanceProgress(labId, LabProgressEntry{
+		Timestamp:   time.Now().Unix(),
+		Status:      Active,
+		Message:     "File System Service Started",
+		ServiceName: FILE_SYSTEM_SERVICE,
+	})
+
 	if err := http.ListenAndServe(":8081", fsMux); err != nil {
 		log.Fatal("File system server error: ", err)
 	}

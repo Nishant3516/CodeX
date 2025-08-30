@@ -6,12 +6,17 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"time"
 
 	"lms_v0/internal/database"
 	"lms_v0/k8s"
 	"lms_v0/utils"
 
 	"github.com/julienschmidt/httprouter"
+)
+
+var (
+	ALLOWED_CONCURRENT_LABS = 5
 )
 
 func (s *Server) RegisterRoutes() http.Handler {
@@ -82,12 +87,22 @@ func (s *Server) healthHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) StartLabHandler(w http.ResponseWriter, r *http.Request) {
-
+	utils.RedisUtilsInstance.CreateLabProgressQueueIfNotExists()
+	utils.RedisUtilsInstance.CreateLabMonitoringQueueIfNotExists()
+	count, err := utils.RedisUtilsInstance.GetNumberOfActiveLabInstances()
+	if err != nil {
+		http.Error(w, fmt.Sprintf("Failed to get number of active lab instances: %v", err), http.StatusInternalServerError)
+		return
+	}
+	if count > uint64(ALLOWED_CONCURRENT_LABS) {
+		http.Error(w, fmt.Sprintf("Exceeded maximum concurrent labs: %d", ALLOWED_CONCURRENT_LABS), http.StatusTooManyRequests)
+		return
+	}
 	var req struct {
 		Language string `json:"language"`
 		LabID    string `json:"labId"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+	if err = json.NewDecoder(r.Body).Decode(&req); err != nil {
 		http.Error(w, "Invalid JSON payload", http.StatusBadRequest)
 		return
 	}
@@ -105,7 +120,17 @@ func (s *Server) StartLabHandler(w http.ResponseWriter, r *http.Request) {
 	sourceKey := fmt.Sprintf("boilerplate/%s", language)
 	destinationKey := fmt.Sprintf("code/%s/%s", language, labId)
 	log.Printf("Copying content from %s to %s", sourceKey, destinationKey)
-	var err any
+
+	labInstance := utils.LabInstanceEntry{
+		Language:       language,
+		LabID:          labId,
+		CreatedAt:      time.Now().Unix(),
+		Status:         utils.Created,
+		LastUpdatedAt:  time.Now().Unix(),
+		ProgressLogs:   []utils.LabProgressEntry{},
+		DirtyReadPaths: []string{},
+	}
+	utils.RedisUtilsInstance.CreateLabInstance(labInstance)
 	err = utils.CopyS3Folder(sourceKey, destinationKey)
 	if err != nil {
 		http.Error(w, fmt.Sprintf("Failed to copy content to S3: %v", err), http.StatusInternalServerError)
@@ -179,6 +204,8 @@ func (s *Server) EndLabHandler(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, fmt.Sprintf("Failed to teardown resources: %v", err), http.StatusInternalServerError)
 		return
 	}
+
+	utils.RedisUtilsInstance.RemoveLabInstance(labId)
 
 	w.WriteHeader(http.StatusOK)
 }

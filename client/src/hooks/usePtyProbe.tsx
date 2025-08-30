@@ -18,9 +18,14 @@ export function usePtyConnection(labId?: string, language?: string) {
     language,
     onServiceAvailable: () => {
       console.log('Terminal service is now available');
+      setIsConnected(true);
+      setError(undefined);
+      setProvisionNeeded(false);
     },
     onServiceUnavailable: () => {
       console.log('Terminal service is starting up...');
+      setIsConnected(false);
+      setError('Terminal is starting up...');
     }
   }) : null;
 

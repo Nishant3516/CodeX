@@ -13,7 +13,8 @@ import { LoadingScreen } from '@/components/editor/LoadingScreen';
 
 // Hooks
 import { useFileSystem } from '@/hooks/useV1Lab';
-import { usePtyConnection } from '@/hooks/usePtyProbe';
+import { useLabProgress } from '@/hooks/useLabProgress';
+import { useSimpleConnections } from '@/hooks/useSimpleConnections';
 import { PLAYGROUND_OPTIONS } from '@/constants/playground';
 
 
@@ -41,7 +42,6 @@ interface LogEntry {
 
 export default function V1ProjectPage() {
   const params = useParams();
-  // Helper to coerce Next.js params
   const getParamString = (p?: string | string[] | undefined) => {
     if (Array.isArray(p)) return p[0] || '';
     if (typeof p === 'string') return p;
@@ -49,16 +49,23 @@ export default function V1ProjectPage() {
   };
 
   const language = getParamString(params?.language) || 'html';
-  const labId = getParamString(params?.labId) || 'test-lab'; // Use a default labId for testing
+  const labId = getParamString(params?.labId) || 'test-lab';
 
-  
+  // Use the simplified progress and connection hooks
+  const { data: progressData, loading: progressLoading, progressLogs, fsActive, ptyActive, status, apiCallCount } = useLabProgress({ labId, language });
+  const { fsConnected, ptyConnected, fsError, ptyError, isReady } = useSimpleConnections({ 
+    labId, 
+    language, 
+    fsActive, 
+    ptyActive 
+  });
+
   // State management - ALL useState calls MUST be at the top
   const [activeFile, setActiveFile] = useState<string | null>(null);
   const [localFileContents, setLocalFileContents] = useState<{[key: string]: string}>({});
   const [dirtyFiles, setDirtyFiles] = useState<Set<string>>(new Set());
   const [expandedDirs, setExpandedDirs] = useState<Set<string>>(new Set(['src']));
   const [isRunning, setIsRunning] = useState(false);
-  const [showProgress, setShowProgress] = useState(true);
   const [consoleLogs, setConsoleLogs] = useState<LogEntry[]>([
     { type: 'info', message: 'Welcome to DevArena Editor!', timestamp: new Date() },
   ]);
@@ -67,53 +74,59 @@ export default function V1ProjectPage() {
   // Refs for tracking state - ALL useRef calls MUST be at the top
   const savingFiles = useRef<Set<string>>(new Set());
 
-  // File system WebSocket hook - always try to connect
+  // File system WebSocket hook - only connect after services are active
   const {
     isConnected,
     connectionError,
-    provisionNeeded: fsProvisionNeeded,
     fileTree,
     fileContents: serverFileContents,
     loading,
-    error: fsError,
-    showTips: fsShowTips,
-    getLoadingTips: fsGetLoadingTips,
+    error: fsFileError,
     loadDirectory,
     loadFileContent,
     saveFile,
     createFile,
     deleteFile,
     renameFile,
-  } = useFileSystem(true, { language, labId }); // Always expect containers
-  // filesystem hook may report that provisioning is needed via `provisionNeeded`
+  } = useFileSystem(isReady && fsConnected, { language, labId });
 
-  // PTY readiness probe
-  const { isConnected: ptyConnected, error: ptyError, isConnecting: ptyConnecting, provisionNeeded: ptyProvisionNeeded, showTips: ptyShowTips, getLoadingTips: ptyGetLoadingTips } = usePtyConnection(labId, language);
+  // Check lab status from Redis first
+  useEffect(() => {
+    // Start progress polling automatically
+    if (!progressLoading && status !== 'active') {
+      // Progress polling will start automatically
+    }
+  }, [progressLoading, status]);
 
-  // Show loading screen until BOTH websockets are connected
-  const bothConnected = isConnected && ptyConnected;
-  const showLoading = !bothConnected;
-
-
+  // Show loading screen until IDE is ready
+  if (!isReady) {
+    return (
+      <LoadingScreen
+        language={language}
+        labId={labId}
+        onReady={() => { /* IDE will load when isReady becomes true */ }}
+      />
+    );
+  }
 
   // ALL useEffect and useCallback hooks MUST be before any conditional returns
   
   // Initialize connection status logging
   useEffect(() => {
-    if (isConnected) {
+    if (fsConnected && ptyConnected) {
       setConsoleLogs(prev => [...prev, {
         type: 'success',
-        message: 'Connected to file system service',
+        message: 'Connected to all services - IDE ready!',
         timestamp: new Date()
       }]);
-    } else if (connectionError) {
+    } else if (fsError || ptyError) {
       setConsoleLogs(prev => [...prev, {
         type: 'warning',
-        message: `Connection failed: ${connectionError}. Retrying...`,
+        message: `Connection issues: ${fsError || ptyError}`,
         timestamp: new Date()
       }]);
     }
-  }, [isConnected, connectionError]);
+  }, [fsConnected, ptyConnected, fsError, ptyError]);
 
   useEffect(() => {
     if (isConnected && Object.keys(fileTree).length > 0 && !activeFile) {
@@ -259,7 +272,7 @@ export default function V1ProjectPage() {
 
   // Handle save (Ctrl+S)
   const handleSave = useCallback(async () => {
-    if (!activeFile || savingFiles.current.has(activeFile)) return;
+    if (!activeFile || savingFiles.current.has(activeFile) || !dirtyFiles.has(activeFile)) return;
 
     const content = getCurrentFileContent(activeFile);
     savingFiles.current.add(activeFile);
@@ -432,43 +445,15 @@ export default function V1ProjectPage() {
   // Get current file content (prioritize local edits over server)
   const currentFileContent = activeFile ? getCurrentFileContent(activeFile) : '';
 
-  // Combine tips from both hooks
-  const showTips = fsShowTips || ptyShowTips;
-  const getLoadingTips = useCallback(() => {
-    const fsTips = fsGetLoadingTips();
-    const ptyTips = ptyGetLoadingTips();
-    return [...fsTips, ...ptyTips];
-  }, [fsGetLoadingTips, ptyGetLoadingTips]);
-
-  if (showLoading) {
-    return (
-      <LoadingScreen
-        language={language}
-        labId={labId}
-        fsConnected={isConnected}
-        fsError={connectionError || fsError || undefined}
-        ptyConnected={ptyConnected}
-        ptyError={ptyError}
-        fsProvisionNeeded={Boolean(fsProvisionNeeded)}
-        ptyProvisionNeeded={ptyProvisionNeeded}
-        showTips={showTips}
-        getLoadingTips={getLoadingTips}
-        onReady={() => { /* no-op: page gating handles transition */ }}
-      />
-    );
-  }  return (
+  return (
     <div className="h-screen w-screen bg-gray-900 overflow-hidden relative">
-  {/* Debug Info removed - no top-left connection overlay per user request */}
+      {/* Debug Info - only in development */}
+      {process.env.NODE_ENV === 'development' && (
+        <div className="absolute top-2 left-2 z-50 bg-blue-900/80 text-blue-200 px-2 py-1 rounded text-xs">
+          API Calls: {apiCallCount} | Status: {status} | FS: {fsActive ? '✓' : '✗'} | PTY: {ptyActive ? '✓' : '✗'}
+        </div>
+      )}
       
-      {/* Progress Indicator */}
-      {/* <ProgressIndicator
-        progress={mockProgress}
-        isVisible={showProgress}
-        onClose={() => setShowProgress(false)}
-      /> */}
-
-      {/* Connection Status */}
-
       {/* Save toast */}
       {saveToast && (
         <div className="absolute top-4 right-4 z-50 bg-green-600 text-white px-3 py-1 rounded text-sm">

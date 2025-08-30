@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"strconv"
+	"time"
 
 	"lms_v0/internal/aws"
 	"lms_v0/k8s"
@@ -20,6 +22,10 @@ type StartRequest struct {
 	LabID    string `json:"labId"`
 }
 
+var (
+	ALLOWED_CONCURRENT_LABS, _ = strconv.ParseUint(os.Getenv("ALLOWED_CONCURRENT_LABS"), 10, 64)
+)
+
 func jsonHeaders() map[string]string {
 	return map[string]string{
 		"Content-Type":                 "application/json",
@@ -31,6 +37,7 @@ func jsonHeaders() map[string]string {
 func handler(ctx context.Context, req events.APIGatewayProxyRequest) (events.APIGatewayProxyResponse, error) {
 	log.Printf("start-quest: handler invoked")
 	aws.InitAWS()
+
 	var payload StartRequest
 	if err := json.Unmarshal([]byte(req.Body), &payload); err != nil {
 		log.Printf("start-quest: invalid payload: %v", err)
@@ -40,17 +47,36 @@ func handler(ctx context.Context, req events.APIGatewayProxyRequest) (events.API
 	if payload.LabID == "" || payload.Language == "" {
 		return events.APIGatewayProxyResponse{StatusCode: 400, Headers: jsonHeaders(), Body: `{"error":"Missing required fields"}`}, nil
 	}
-
+	utils.RedisUtilsInstance.CreateLabProgressQueueIfNotExists()
+	utils.RedisUtilsInstance.CreateLabMonitoringQueueIfNotExists()
+	count, err := utils.RedisUtilsInstance.GetNumberOfActiveLabInstances()
+	if err != nil {
+		log.Printf("start-quest: failed to get number of active lab instances: %v", err)
+		return events.APIGatewayProxyResponse{StatusCode: 500, Body: fmt.Sprintf(`{"error":"Failed to get number of active lab instances: %s"}`, err.Error())}, nil
+	}
+	if count > ALLOWED_CONCURRENT_LABS {
+		return events.APIGatewayProxyResponse{StatusCode: 429, Body: fmt.Sprintf(`{"error":"Exceeded maximum concurrent labs: %d"}`, ALLOWED_CONCURRENT_LABS)}, nil
+	}
 	// Initialize k8s client from in-cluster token/env
 	if err := k8s.InitK8sInCluster(); err != nil {
 		log.Printf("start-quest: failed to init k8s in-cluster: %v", err)
 		return events.APIGatewayProxyResponse{StatusCode: 500, Body: fmt.Sprintf(`{"error":"Init k8s failed: %s"}`, err.Error())}, nil
 	}
 
+	labInstance := utils.LabInstanceEntry{
+		Language:       payload.Language,
+		LabID:          payload.LabID,
+		CreatedAt:      time.Now().Unix(),
+		Status:         utils.Created,
+		LastUpdatedAt:  time.Now().Unix(),
+		ProgressLogs:   []utils.LabProgressEntry{},
+		DirtyReadPaths: []string{},
+	}
+	utils.RedisUtilsInstance.CreateLabInstance(labInstance)
 	destinationKey := fmt.Sprintf("code/%s/%s", payload.Language, payload.LabID)
 
 	sourceKey := fmt.Sprintf("boilerplate/%s", payload.Language)
-	err := utils.CopyS3Folder(sourceKey, destinationKey)
+	err = utils.CopyS3Folder(sourceKey, destinationKey)
 	if err != nil {
 		log.Printf("start-quest: failed to copy S3 folder: %v", err)
 		return events.APIGatewayProxyResponse{StatusCode: 500, Body: fmt.Sprintf(`{"error":"Copy S3 folder failed: %s"}`, err.Error())}, nil

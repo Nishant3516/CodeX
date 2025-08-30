@@ -83,12 +83,22 @@ func CopyS3Folder(sourceKey, destinationKey string) error {
 		return fmt.Errorf("AWS_S3_BUCKET_NAME must be set")
 	}
 
+	labId := strings.Split(destinationKey, "/")[2]
 	if !strings.HasSuffix(sourceKey, "/") {
 		sourceKey += "/"
 	}
 	if !strings.HasSuffix(destinationKey, "/") {
 		destinationKey += "/"
 	}
+
+	progress := LabProgressEntry{
+		Timestamp:   time.Now().Unix(),
+		Status:      Booting,
+		Message:     "Copying S3 folder from boiler plate to new file",
+		ServiceName: S3_SERVICE,
+	}
+
+	RedisUtilsInstance.UpdateLabInstanceProgress(labId, progress)
 
 	log.Printf("Starting optimized copy from s3://%s/%s to s3://%s/%s", bucket, sourceKey, bucket, destinationKey)
 
@@ -151,6 +161,14 @@ func CopyS3Folder(sourceKey, destinationKey string) error {
 		}
 	}
 
+	progress = LabProgressEntry{
+		Timestamp:   time.Now().Unix(),
+		Status:      Booting,
+		Message:     "Successfully Copied Code From " + sourceKey + " to " + destinationKey,
+		ServiceName: S3_SERVICE,
+	}
+
+	RedisUtilsInstance.UpdateLabInstanceProgress(labId, progress)
 	log.Printf("Successfully copied %d objects (%d bytes) from %s to %s", totalObjects, totalSize, sourceKey, destinationKey)
 	return nil
 }

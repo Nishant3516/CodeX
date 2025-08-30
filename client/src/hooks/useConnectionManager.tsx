@@ -153,70 +153,62 @@ export function useConnectionManager({
     }, 20000);
 
     try {
-      const messages = [
-        `🔍 Connecting to ${serviceName}...`,
-        `⏳ Establishing connection to ${serviceName}...`,
-        `⚡ Almost there, connecting to ${serviceName}...`,
-        `🎯 Finalizing connection to ${serviceName}...`
-      ];
+      // First check if lab exists in Redis and get progress
+      const progressResponse = await fetch(`/api/project/progress/${labId}`);
+      const progressData = await progressResponse.json();
 
-      let messageIndex = 0;
-      const messageInterval = setInterval(() => {
-        messageIndex = (messageIndex + 1) % messages.length;
-        setLoadingMessage(messages[messageIndex]);
-      }, 4000);
+      if (progressData.exists) {
+        // Lab exists, show progress instead of polling WebSocket
+        const currentStatus = progressData.status;
+        const progressLogs = progressData.progressLogs || [];
 
-      // Direct WebSocket availability check with longer timeout
-      const result = await new Promise<ConnectionCheckResult>((resolve) => {
-        const testSocket = new WebSocket(serviceUrl);
-        const timeout = setTimeout(() => {
-          testSocket.close();
-          resolve({ available: false, error: 'Connection timeout - service may be starting up' });
-        }, 8000); // Increased from 3 seconds to 8 seconds
+        // Show latest progress message
+        const latestLog = progressLogs[progressLogs.length - 1];
+        if (latestLog) {
+          setLoadingMessage(`${latestLog.ServiceName}: ${latestLog.Message}`);
+        } else {
+          setLoadingMessage(`Lab status: ${currentStatus}`);
+        }
 
-        testSocket.onopen = () => {
-          clearTimeout(timeout);
-          clearInterval(messageInterval);
-          resolve({ available: true });
-        };
+        // If lab is active, consider it available
+        if (currentStatus === 'active') {
+          clearTimeout(tipsTimeout);
+          setShowTips(false);
+          setConnectionStartTime(null);
+          setLoadingMessage(`✅ ${serviceName} is ready!`);
+          onServiceAvailable?.();
+          return { available: true };
+        }
 
-        testSocket.onerror = (error) => {
-          clearTimeout(timeout);
-          clearInterval(messageInterval);
-          resolve({ available: false, error: 'Connection failed - service may be starting up' });
-        };
+        // If lab is still booting, wait and check again
+        if (currentStatus === 'booting') {
+          setLoadingMessage('⏳ Services are starting up...');
+          await new Promise(resolve => setTimeout(resolve, 3000));
+          return { available: false, error: 'Services are starting up...' };
+        }
 
-        testSocket.onclose = (event) => {
-          clearTimeout(timeout);
-          clearInterval(messageInterval);
-          if (event.code === 1000) {
-            resolve({ available: true });
-          } else {
-            resolve({ available: false, error: `Connection closed - service may be starting up` });
+        // For other statuses, try to start if not already attempted
+        if (!startAttempted) {
+          const started = await startProject();
+          if (started) {
+            setLoadingMessage('⏱️ Services are starting up...');
+            await new Promise(resolve => setTimeout(resolve, 5000));
+            onServiceUnavailable?.();
+            return { available: false, error: 'Services are starting up...' };
           }
-        };
-      });
+        }
 
-      clearTimeout(tipsTimeout);
-      clearInterval(messageInterval);
-      setShowTips(false);
-      setConnectionStartTime(null);
-
-      if (result.available) {
-        setLoadingMessage(`✅ Connected to ${serviceName} successfully!`);
-        onServiceAvailable?.();
-        return result;
+        return { available: false, error: `Lab status: ${currentStatus}` };
       } else {
-        // Service not available - try to start it
+        // Lab doesn't exist, try to start it
         const started = await startProject();
         if (started) {
-          // Wait longer for the service to start up
-          setLoadingMessage('⏱️ Waiting for services to fully start...');
-          await new Promise(resolve => setTimeout(resolve, 5000)); // Increased from 2 to 5 seconds
+          setLoadingMessage('⏱️ Services are starting up...');
+          await new Promise(resolve => setTimeout(resolve, 5000));
           onServiceUnavailable?.();
-          return { available: false, error: 'Service is starting up...' };
+          return { available: false, error: 'Services are starting up...' };
         } else {
-          return result;
+          return { available: false, error: 'Failed to start lab' };
         }
       }
     } catch (error: any) {
@@ -226,7 +218,7 @@ export function useConnectionManager({
 
       return { available: false, error: error.message };
     }
-  }, [startProject, onServiceAvailable, onServiceUnavailable]);
+  }, [startProject, onServiceAvailable, onServiceUnavailable, labId, startAttempted]);
 
   const getLoadingTips = useCallback(() => {
     const tips = [
