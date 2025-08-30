@@ -9,6 +9,7 @@ import (
 
 	"lms_v0/internal/database"
 	"lms_v0/k8s"
+	"lms_v0/utils"
 
 	"github.com/julienschmidt/httprouter"
 )
@@ -105,11 +106,11 @@ func (s *Server) StartLabHandler(w http.ResponseWriter, r *http.Request) {
 	destinationKey := fmt.Sprintf("code/%s/%s", language, labId)
 	log.Printf("Copying content from %s to %s", sourceKey, destinationKey)
 	var err any
-	// err = utils.CopyS3Folder(sourceKey, destinationKey)
-	// if err != nil {
-	// 	http.Error(w, fmt.Sprintf("Failed to copy content to S3: %v", err), http.StatusInternalServerError)
-	// 	return
-	// }
+	err = utils.CopyS3Folder(sourceKey, destinationKey)
+	if err != nil {
+		http.Error(w, fmt.Sprintf("Failed to copy content to S3: %v", err), http.StatusInternalServerError)
+		return
+	}
 
 	params := struct {
 		LabID                 string
@@ -130,8 +131,6 @@ func (s *Server) StartLabHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	log.Printf("Starting to spin up resources for LabID: %s", params.LabID)
 
-	// Ensure the Kubernetes client is initialized. InitK8sClient will read
-	// kubeconfig from the current user's home directory (~/.kube/config).
 	if err := k8s.InitK8sClient(); err != nil {
 		log.Printf("failed to initialize kubernetes client: %v", err)
 		http.Error(w, fmt.Sprintf("Failed to initialize kubernetes client: %v", err), http.StatusInternalServerError)

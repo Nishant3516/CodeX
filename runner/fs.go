@@ -124,9 +124,6 @@ func FetchFileContentHandler(ctx context.Context, payload json.RawMessage, clien
 		Content: string(content),
 	}
 
-	// Queue S3 sync for file access
-	go queueS3Update("read", req.Path, string(content))
-
 	return client.SendResponse(RESPONSE_FILE_CONTENT, response)
 }
 
@@ -151,9 +148,6 @@ func FileContentUpdateHandler(ctx context.Context, payload json.RawMessage, clie
 
 	fileUpdatePath := fmt.Sprintf("code/%s/%s/%s", LANGUAGE, LAB_ID, req.Path)
 	log.Printf("FILE PATH: %s", fileUpdatePath)
-
-	// Queue S3 sync for file update
-	go queueS3Update("update", fileUpdatePath, req.Content)
 
 	return client.SendResponse(RESPONSE_FILE_UPDATED, map[string]interface{}{
 		"path":    req.Path,
@@ -180,8 +174,7 @@ func NewFileHandler(ctx context.Context, payload json.RawMessage, client *Client
 		if err := os.MkdirAll(targetPath, 0755); err != nil {
 			return fmt.Errorf("failed to create directory %s: %w", targetPath, err)
 		}
-		// Queue S3 sync for directory creation
-		go queueS3Update("create_dir", req.Path, "")
+
 	} else {
 		content := req.Content
 		if content == "" {
@@ -190,8 +183,7 @@ func NewFileHandler(ctx context.Context, payload json.RawMessage, client *Client
 		if err := os.WriteFile(targetPath, []byte(content), 0644); err != nil {
 			return fmt.Errorf("failed to create file %s: %w", targetPath, err)
 		}
-		// Queue S3 sync for file creation
-		go queueS3Update("create", req.Path, content)
+
 	}
 
 	return client.SendResponse(RESPONSE_FILE_CREATED, map[string]interface{}{
@@ -212,20 +204,13 @@ func DeleteFileHandler(ctx context.Context, payload json.RawMessage, client *Cli
 	targetPath := safeJoinPath(workspaceDir, req.Path)
 
 	// Check if file/directory exists
-	info, err := os.Stat(targetPath)
+	_, err := os.Stat(targetPath)
 	if err != nil {
 		return fmt.Errorf("failed to stat %s: %w", targetPath, err)
 	}
 
 	if err := os.RemoveAll(targetPath); err != nil {
 		return fmt.Errorf("failed to delete %s: %w", targetPath, err)
-	}
-
-	// Queue S3 sync for deletion
-	if info.IsDir() {
-		go queueS3Update("delete_dir", req.Path, "")
-	} else {
-		go queueS3Update("delete", req.Path, "")
 	}
 
 	return client.SendResponse(RESPONSE_FILE_DELETED, map[string]interface{}{
@@ -253,9 +238,6 @@ func EditFileMetaHandler(ctx context.Context, payload json.RawMessage, client *C
 	if err := os.Rename(oldPath, newPath); err != nil {
 		return fmt.Errorf("failed to rename %s to %s: %w", oldPath, newPath, err)
 	}
-
-	// Queue S3 sync for file move
-	go queueS3Update("move", req.OldPath, req.NewPath)
 
 	return client.SendResponse(RESPONSE_FILE_RENAMED, map[string]interface{}{
 		"oldPath": req.OldPath,
