@@ -24,26 +24,31 @@ spec:
         runAsGroup: 1000
         fsGroup: 1000
       initContainers:
-        - name: copy-s3-content
+        - name: copy-r2-content
           image: amazon/aws-cli:latest
           command:
             - /bin/sh
             - -c
             - |
-              echo 'S3 bucket: {{.S3Bucket}}' && echo 'S3 key: {{.S3Key}}' && aws s3 cp s3://{{.S3Bucket}}/{{.S3Key}} /workspace --recursive
+              echo 'R2 bucket: {{.S3Bucket}}' && echo 'R2 key: {{.S3Key}}' && aws s3 cp s3://{{.S3Bucket}}/{{.S3Key}} /workspace --recursive --endpoint-url https://$R2_ACCOUNT_ID.r2.cloudflarestorage.com
           env:
             - name: AWS_ACCESS_KEY_ID
               valueFrom:
                 secretKeyRef:
                   name: aws-secrets
-                  key: AWS_ACCESS_KEY_ID
+                  key: R2_ACCESS_KEY
             - name: AWS_SECRET_ACCESS_KEY
               valueFrom:
                 secretKeyRef:
                   name: aws-secrets
-                  key: AWS_SECRET_ACCESS_KEY
+                  key: R2_SECRET_KEY
             - name: AWS_DEFAULT_REGION
-              value: "ap-south-1" # Change to your region
+              value: "auto" # R2 uses 'auto' region
+            - name: R2_ACCOUNT_ID
+              valueFrom:
+                secretKeyRef:
+                  name: aws-secrets
+                  key: R2_ACCOUNT_ID
           volumeMounts:
             - name: workspace-volume
               mountPath: /workspace
@@ -97,14 +102,14 @@ spec:
               valueFrom:
                 secretKeyRef:
                   name: aws-secrets
-                  key: AWS_ACCESS_KEY_ID
+                  key: R2_ACCESS_KEY
             - name: AWS_SECRET_ACCESS_KEY
               valueFrom:
                 secretKeyRef:
                   name: aws-secrets
-                  key: AWS_SECRET_ACCESS_KEY
+                  key: R2_SECRET_KEY
             - name: AWS_DEFAULT_REGION
-              value: "ap-south-1" # Change to your region
+              value: "auto" # R2 uses 'auto' region
             - name: AWS_S3_BUCKET_NAME
               valueFrom:
                 secretKeyRef:
@@ -120,6 +125,11 @@ spec:
                 secretKeyRef:
                   name: aws-secrets
                   key: REDIS_URI
+            - name: R2_ACCOUNT_ID
+              valueFrom:
+                secretKeyRef:
+                  name: aws-secrets
+                  key: R2_ACCOUNT_ID
           volumeMounts:
             - name: workspace-volume
               mountPath: /workspace

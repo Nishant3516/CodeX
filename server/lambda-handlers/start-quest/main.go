@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"lms_v0/internal/aws"
+	"lms_v0/internal/redis"
 	"lms_v0/k8s"
 	"lms_v0/utils"
 
@@ -36,7 +37,11 @@ func jsonHeaders() map[string]string {
 }
 func handler(ctx context.Context, req events.APIGatewayProxyRequest) (events.APIGatewayProxyResponse, error) {
 	log.Printf("start-quest: handler invoked")
+
+	// Initialize AWS and Redis clients
 	aws.InitAWS()
+	redis.InitRedis()
+	utils.InitRedisUtils(redis.RedisClient, redis.Context)
 
 	var payload StartRequest
 	if err := json.Unmarshal([]byte(req.Body), &payload); err != nil {
@@ -47,8 +52,8 @@ func handler(ctx context.Context, req events.APIGatewayProxyRequest) (events.API
 	if payload.LabID == "" || payload.Language == "" {
 		return events.APIGatewayProxyResponse{StatusCode: 400, Headers: jsonHeaders(), Body: `{"error":"Missing required fields"}`}, nil
 	}
-	utils.RedisUtilsInstance.CreateLabProgressQueueIfNotExists()
 	utils.RedisUtilsInstance.CreateLabMonitoringQueueIfNotExists()
+	utils.RedisUtilsInstance.CreateLabProgressQueueIfNotExists()
 	count, err := utils.RedisUtilsInstance.GetNumberOfActiveLabInstances()
 	if err != nil {
 		log.Printf("start-quest: failed to get number of active lab instances: %v", err)
@@ -76,11 +81,25 @@ func handler(ctx context.Context, req events.APIGatewayProxyRequest) (events.API
 	destinationKey := fmt.Sprintf("code/%s/%s", payload.Language, payload.LabID)
 
 	sourceKey := fmt.Sprintf("boilerplate/%s", payload.Language)
-	err = utils.CopyS3Folder(sourceKey, destinationKey)
-	if err != nil {
-		log.Printf("start-quest: failed to copy S3 folder: %v", err)
-		return events.APIGatewayProxyResponse{StatusCode: 500, Body: fmt.Sprintf(`{"error":"Copy S3 folder failed: %s"}`, err.Error())}, nil
-	}
+
+	// Start S3 copy operation asynchronously
+	go func() {
+		copyCtx := context.Background()
+		err := utils.CopyS3FolderAsync(copyCtx, sourceKey, destinationKey)
+		if err != nil {
+			log.Printf("start-quest: async copy failed: %v", err)
+			// Update lab status to error
+			errorProgress := utils.LabProgressEntry{
+				Timestamp:   time.Now().Unix(),
+				Status:      utils.Error,
+				Message:     fmt.Sprintf("Failed to copy files: %v", err),
+				ServiceName: utils.S3_SERVICE,
+			}
+			utils.RedisUtilsInstance.UpdateLabInstanceProgress(payload.LabID, errorProgress)
+			return
+		}
+		log.Printf("start-quest: async copy completed successfully for %s", payload.LabID)
+	}()
 
 	params := k8s.SpinUpParams{
 		LabID:                 payload.LabID,

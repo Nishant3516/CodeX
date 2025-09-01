@@ -1,5 +1,36 @@
 import React, { FC, useState, useCallback, useRef } from 'react';
 
+// Shimmer loading items for file explorer
+const ShimmerItem: FC<{ level?: number }> = ({ level = 0 }) => (
+  <div className="animate-pulse">
+    <div
+      className="flex items-center gap-1 px-2 py-1 rounded"
+      style={{ paddingLeft: `${8 + level * 16}px` }}
+    >
+      <div className="w-3 h-3 bg-gray-300 dark:bg-gray-600 rounded"></div>
+      <div className="w-4 h-4 bg-gray-300 dark:bg-gray-600 rounded"></div>
+      <div className="flex-1 h-4 bg-gray-300 dark:bg-gray-600 rounded max-w-32"></div>
+    </div>
+  </div>
+);
+
+const LoadingFileTree: FC = () => (
+  <div className="space-y-1 p-2">
+    <ShimmerItem level={0} />
+    <ShimmerItem level={0} />
+    <div className="ml-4 space-y-1">
+      <ShimmerItem level={1} />
+      <ShimmerItem level={1} />
+      <ShimmerItem level={1} />
+    </div>
+    <ShimmerItem level={0} />
+    <div className="ml-4 space-y-1">
+      <ShimmerItem level={1} />
+      <ShimmerItem level={1} />
+    </div>
+  </div>
+);
+
 const getFileIcon = (filename: string, isDir: boolean) => {
   if (isDir) return '📁';
   
@@ -61,6 +92,7 @@ type FileExplorerProps = {
   onFileCreate: (path: string, isDir: boolean) => void;
   onFileDelete?: (path: string) => void;
   onFileRename?: (oldPath: string, newPath: string) => void;
+  isLoading?: boolean; // Add loading prop
 };
 
 interface FileItemProps {
@@ -222,7 +254,8 @@ const FileExplorer: FC<FileExplorerProps> = ({
   onDirectoryToggle,
   onFileCreate,
   onFileDelete,
-  onFileRename
+  onFileRename,
+  isLoading = false
 }) => {
   const [isOpen, setIsOpen] = useState(true);
   // inline create state: path being edited ('' = root)
@@ -307,7 +340,9 @@ const FileExplorer: FC<FileExplorerProps> = ({
       
       {isOpen && (
         <div className="flex-1 overflow-y-auto p-2">
-          {Object.keys(fileTree).length === 0 ? (
+          {isLoading && Object.keys(fileTree).length === 0 ? (
+            <LoadingFileTree />
+          ) : Object.keys(fileTree).length === 0 ? (
             <div className="text-sm text-gray-500 italic p-2">
               No files found. Click ➕ to create a new file.
             </div>

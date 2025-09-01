@@ -113,6 +113,10 @@ func (r *RedisUtils) CreateLabMonitoringQueueIfNotExists() {
 	if err != nil {
 		log.Fatalf("Failed to create lab monitoring queue: %v", err)
 	}
+	err = r.Client.LRem(r.Ctx, "labs_monitor", 1, "init").Err()
+	if err != nil {
+		log.Fatalf("Failed to remove init placeholder from lab monitoring queue: %v", err)
+	}
 	log.Println("Lab monitoring queue ensured to exist")
 }
 

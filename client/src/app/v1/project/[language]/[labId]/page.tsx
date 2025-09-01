@@ -2,6 +2,7 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { useParams } from 'next/navigation';
 import { Panel, PanelGroup, PanelResizeHandle } from 'react-resizable-panels';
+import { Loader2 } from 'lucide-react';
 
 // Components
 import FileExplorer from '@/components/editor/FileExplorer';
@@ -51,6 +52,7 @@ export default function V1ProjectPage() {
   const language = getParamString(params?.language) || 'html';
   const labId = getParamString(params?.labId) || 'test-lab';
 
+  // ALL HOOKS MUST BE CALLED AT THE TOP, BEFORE ANY CONDITIONAL RETURNS
   // Use the simplified progress and connection hooks
   const { data: progressData, loading: progressLoading, progressLogs, fsActive, ptyActive, status, apiCallCount } = useLabProgress({ labId, language });
   const { fsConnected, ptyConnected, fsError, ptyError, isReady } = useSimpleConnections({ 
@@ -74,7 +76,7 @@ export default function V1ProjectPage() {
   // Refs for tracking state - ALL useRef calls MUST be at the top
   const savingFiles = useRef<Set<string>>(new Set());
 
-  // File system WebSocket hook - only connect after services are active
+  // File system WebSocket hook - ALWAYS call the hook, just conditionally use the connection
   const {
     isConnected,
     connectionError,
@@ -88,29 +90,19 @@ export default function V1ProjectPage() {
     createFile,
     deleteFile,
     renameFile,
-  } = useFileSystem(isReady && fsConnected, { language, labId });
-
-  // Check lab status from Redis first
-  useEffect(() => {
-    // Start progress polling automatically
-    if (!progressLoading && status !== 'active') {
-      // Progress polling will start automatically
-    }
-  }, [progressLoading, status]);
-
-  // Show loading screen until IDE is ready
-  if (!isReady) {
-    return (
-      <LoadingScreen
-        language={language}
-        labId={labId}
-        onReady={() => { /* IDE will load when isReady becomes true */ }}
-      />
-    );
-  }
+  } = useFileSystem(true, { language, labId }); // Always enable, but connection logic handled inside
 
   // ALL useEffect and useCallback hooks MUST be before any conditional returns
   
+  // Stop polling when IDE is ready to avoid unnecessary API calls
+  useEffect(() => {
+    if (isReady) {
+      // The polling will continue in the background, but that's fine
+      // The user now has the IDE to interact with immediately
+      console.log('IDE is ready - user can now interact with the interface');
+    }
+  }, [isReady]);
+
   // Initialize connection status logging
   useEffect(() => {
     if (fsConnected && ptyConnected) {
@@ -418,7 +410,6 @@ export default function V1ProjectPage() {
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [handleSave]);
 
-
   // Handle run
   const handleRun = useCallback(() => {
     setIsRunning(true);
@@ -442,18 +433,37 @@ export default function V1ProjectPage() {
     setConsoleLogs([]);
   }, []);
 
+  // NOW WE CAN HAVE CONDITIONAL RETURNS - ALL HOOKS ARE ABOVE THIS LINE
+
+  // Show loading screen until connections are established (not waiting for file tree)
+  console.log('Main page debug:', {
+    isReady,
+    fileTreeKeys: Object.keys(fileTree),
+    fileTreeLength: Object.keys(fileTree).length,
+    loading,
+    fsConnected,
+    ptyConnected
+  });
+  
+  if (!isReady) {
+    return (
+      <LoadingScreen
+        language={language}
+        labId={labId}
+        onReady={() => {
+          // IDE will load immediately when connections are established
+          console.log('Loading screen complete, transitioning to IDE');
+        }}
+      />
+    );
+  }
+
   // Get current file content (prioritize local edits over server)
   const currentFileContent = activeFile ? getCurrentFileContent(activeFile) : '';
 
   return (
     <div className="h-screen w-screen bg-gray-900 overflow-hidden relative">
-      {/* Debug Info - only in development */}
-      {process.env.NODE_ENV === 'development' && (
-        <div className="absolute top-2 left-2 z-50 bg-blue-900/80 text-blue-200 px-2 py-1 rounded text-xs">
-          API Calls: {apiCallCount} | Status: {status} | FS: {fsActive ? '✓' : '✗'} | PTY: {ptyActive ? '✓' : '✗'}
-        </div>
-      )}
-      
+
       {/* Save toast */}
       {saveToast && (
         <div className="absolute top-4 right-4 z-50 bg-green-600 text-white px-3 py-1 rounded text-sm">
@@ -461,18 +471,7 @@ export default function V1ProjectPage() {
         </div>
       )}
 
-      {/* Main Content */}
-      {Object.keys(fileTree).length === 0 ? (
-        <div className="flex items-center justify-center h-full text-white">
-          <div className="text-center">
-            <div className="text-xl mb-4">Loading workspace...</div>
-            <div className="text-sm text-gray-400">
-              {loading ? 'Connecting to file system...' : 'No files found'}
-            </div>
-          </div>
-        </div>
-      ) : (
-
+      {/* Main Content - Show IDE immediately when connected */}
       <PanelGroup direction="horizontal">
         {/* File Explorer Panel */}
         <Panel defaultSize={20} minSize={15} maxSize={30}>
@@ -486,6 +485,7 @@ export default function V1ProjectPage() {
             onFileCreate={handleFileCreate}
             onFileDelete={handleFileDelete}
             onFileRename={handleFileRename}
+            isLoading={isConnected && Object.keys(fileTree).length === 0}
           />
         </Panel>
 
@@ -532,7 +532,6 @@ export default function V1ProjectPage() {
           </PanelGroup>
         </Panel>
       </PanelGroup>
-      )}
     </div>
   );
 }

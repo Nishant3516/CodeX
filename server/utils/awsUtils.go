@@ -203,3 +203,179 @@ func processCopyBatch(ctx context.Context, copyObjects []s3.CopyObjectInput) err
 
 	return firstError
 }
+
+// CopyS3FolderAsync performs the same operation as CopyS3Folder but with proper context handling for async operations
+func CopyS3FolderAsync(ctx context.Context, sourceKey, destinationKey string) error {
+	bucket := os.Getenv("AWS_S3_BUCKET_NAME")
+
+	if bucket == "" {
+		log.Println("AWS_S3_BUCKET_NAME must be set")
+		return fmt.Errorf("AWS_S3_BUCKET_NAME must be set")
+	}
+
+	labId := strings.Split(destinationKey, "/")[2]
+	if !strings.HasSuffix(sourceKey, "/") {
+		sourceKey += "/"
+	}
+	if !strings.HasSuffix(destinationKey, "/") {
+		destinationKey += "/"
+	}
+
+	progress := LabProgressEntry{
+		Timestamp:   time.Now().Unix(),
+		Status:      Booting,
+		Message:     "Starting file copy from boilerplate",
+		ServiceName: S3_SERVICE,
+	}
+
+	RedisUtilsInstance.UpdateLabInstanceProgress(labId, progress)
+
+	log.Printf("Starting async copy from s3://%s/%s to s3://%s/%s", bucket, sourceKey, bucket, destinationKey)
+
+	listInput := &s3.ListObjectsV2Input{
+		Bucket:  &bucket,
+		Prefix:  &sourceKey,
+		MaxKeys: awsMethods.Int32(500), // Smaller batches for better performance
+	}
+
+	var copyObjects []s3.CopyObjectInput
+	totalObjects := 0
+	totalSize := int64(0)
+
+	// Collect all objects to copy first
+	paginator := s3.NewListObjectsV2Paginator(aws.S3Client, listInput)
+	for paginator.HasMorePages() {
+		// Check if context was cancelled
+		select {
+		case <-ctx.Done():
+			return fmt.Errorf("copy operation cancelled: %w", ctx.Err())
+		default:
+		}
+
+		page, err := paginator.NextPage(ctx)
+		if err != nil {
+			progress = LabProgressEntry{
+				Timestamp:   time.Now().Unix(),
+				Status:      Error,
+				Message:     fmt.Sprintf("Failed to list files: %v", err),
+				ServiceName: S3_SERVICE,
+			}
+			RedisUtilsInstance.UpdateLabInstanceProgress(labId, progress)
+			return fmt.Errorf("failed to list objects: %w", err)
+		}
+
+		for _, obj := range page.Contents {
+			sourceObjectKey := awsMethods.ToString(obj.Key)
+
+			if sourceObjectKey == sourceKey {
+				continue
+			}
+
+			relativePath := strings.TrimPrefix(sourceObjectKey, sourceKey)
+			if relativePath == "" {
+				continue
+			}
+
+			newDestinationKey := destinationKey + relativePath
+			copySource := bucket + "/" + sourceObjectKey
+
+			copyObjects = append(copyObjects, s3.CopyObjectInput{
+				Bucket:     &bucket,
+				CopySource: &copySource,
+				Key:        &newDestinationKey,
+			})
+
+			totalObjects++
+			if obj.Size != nil {
+				totalSize += *obj.Size
+			}
+
+			// Process in smaller batches to avoid long operations
+			if len(copyObjects) >= 50 {
+				if err := processCopyBatchAsync(ctx, copyObjects, labId, totalObjects); err != nil {
+					progress = LabProgressEntry{
+						Timestamp:   time.Now().Unix(),
+						Status:      Error,
+						Message:     fmt.Sprintf("Copy batch failed: %v", err),
+						ServiceName: S3_SERVICE,
+					}
+					RedisUtilsInstance.UpdateLabInstanceProgress(labId, progress)
+					return fmt.Errorf("failed to process copy batch: %w", err)
+				}
+				copyObjects = copyObjects[:0]
+			}
+		}
+	}
+
+	if len(copyObjects) > 0 {
+		if err := processCopyBatchAsync(ctx, copyObjects, labId, totalObjects); err != nil {
+			progress = LabProgressEntry{
+				Timestamp:   time.Now().Unix(),
+				Status:      Error,
+				Message:     fmt.Sprintf("Final copy batch failed: %v", err),
+				ServiceName: S3_SERVICE,
+			}
+			RedisUtilsInstance.UpdateLabInstanceProgress(labId, progress)
+			return fmt.Errorf("failed to process final copy batch: %w", err)
+		}
+	}
+
+	progress = LabProgressEntry{
+		Timestamp:   time.Now().Unix(),
+		Status:      Booting,
+		Message:     "Files copied successfully, setting up environment",
+		ServiceName: S3_SERVICE,
+	}
+
+	RedisUtilsInstance.UpdateLabInstanceProgress(labId, progress)
+	log.Printf("Successfully copied %d objects (%d bytes) from %s to %s", totalObjects, totalSize, sourceKey, destinationKey)
+	return nil
+}
+
+func processCopyBatchAsync(ctx context.Context, copyObjects []s3.CopyObjectInput, labId string, currentProgress int) error {
+	const maxConcurrency = 5 // Reduced concurrency for better stability
+	semaphore := make(chan struct{}, maxConcurrency)
+	errChan := make(chan error, len(copyObjects))
+
+	// Update progress
+	progress := LabProgressEntry{
+		Timestamp:   time.Now().Unix(),
+		Status:      Booting,
+		Message:     fmt.Sprintf("Copying files... (%d processed)", currentProgress),
+		ServiceName: S3_SERVICE,
+	}
+	RedisUtilsInstance.UpdateLabInstanceProgress(labId, progress)
+
+	// Process each copy operation concurrently
+	for _, copyInput := range copyObjects {
+		go func(input s3.CopyObjectInput) {
+			semaphore <- struct{}{}        // Acquire semaphore
+			defer func() { <-semaphore }() // Release semaphore
+
+			// Check if context was cancelled
+			select {
+			case <-ctx.Done():
+				errChan <- fmt.Errorf("copy operation cancelled: %w", ctx.Err())
+				return
+			default:
+			}
+
+			_, err := aws.S3Client.CopyObject(ctx, &input)
+			if err != nil {
+				errChan <- fmt.Errorf("failed to copy object %s: %w", *input.Key, err)
+				return
+			}
+			errChan <- nil
+		}(copyInput)
+	}
+
+	// Wait for all operations to complete
+	var firstError error
+	for i := 0; i < len(copyObjects); i++ {
+		if err := <-errChan; err != nil && firstError == nil {
+			firstError = err
+		}
+	}
+
+	return firstError
+}

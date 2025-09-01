@@ -20,6 +20,8 @@ import { useConnectionManager } from "./useConnectionManager";
 
 // Module-level cache to survive Fast Refresh / remounts.
 let globalQuestMetaCache: QuestMetaResponse | null = null;
+let globalMetaFetched = false; // Global flag to prevent refetching across component instances
+let globalInitializationPromise: Promise<void> | null = null; // Global promise to prevent concurrent fetches
 
 // Helper to build a file tree from a flat list
 const buildFileTree = (files: FileInfo[]) => {
@@ -61,6 +63,9 @@ export const useFileSystem = (
   expectContainers: boolean = false,
   params: ProjectParams
 ) => {
+  console.log("useFileSystem hook called with:", { expectContainers, params });
+  console.log("📊 Initial fileTree state:", {});
+
   const [isConnected, setIsConnected] = useState(false);
   const [connectionError, setConnectionError] = useState<string | null>(null);
   const [provisionNeeded, setProvisionNeeded] = useState(false);
@@ -68,6 +73,11 @@ export const useFileSystem = (
   const [fileContents, setFileContents] = useState<Record<string, string>>({});
   const [loading, setLoading] = useState(expectContainers); // Start loading if we expect containers
   const [error, setError] = useState<string | null>(null);
+
+  // Refs to prevent excessive re-renders
+  const initializationStarted = useRef(false);
+  const metadataFetched = useRef(false);
+  const mountedRef = useRef(true);
 
   const connectionManager = useConnectionManager({
     labId: params.labId,
@@ -104,8 +114,10 @@ export const useFileSystem = (
   const directoryCache = useRef<Record<string, FileInfo[]>>({});
   const initialized = useRef(false);
   const isInitializing = useRef(false);
+  const connectionInitiated = useRef(false); // Track if connection was initiated
   const memoizedFileTree = useMemo(() => fileTree, [fileTree]);
-  const socketUrl = buildFsUrl(params.labId);
+  const socketUrl = useMemo(() => buildFsUrl(params.labId), [params.labId]); // Memoize socketUrl
+  const metaFetched = useRef(false); // Prevent duplicate meta requests
   // Helpers to operate on the nested fileTree structure (pure functions)
   const insertNodeAtPath = (tree: any, path: string, node: any) => {
     const newTree = JSON.parse(JSON.stringify(tree || {}));
@@ -178,26 +190,93 @@ export const useFileSystem = (
   };
 
   useEffect(() => {
-    if (initialized.current || isInitializing.current) return;
+    console.log("🔥 useV1Lab MAIN useEffect triggered at:", new Date().toISOString());
+    console.log("useV1Lab useEffect state:", {
+      initializationStarted: initializationStarted.current,
+      metadataFetched: metadataFetched.current,
+      expectContainers,
+      globalMetaFetched,
+      hasCache: !!globalQuestMetaCache,
+      socketUrl,
+      connectionManagerReady: !!connectionManager
+    });
 
-    // If we don't expect containers, skip connection attempts
-    if (!expectContainers) {
-      setLoading(false);
-      setIsConnected(false);
-      initialized.current = true;
+    // Skip if already started initialization or metadata is fetched
+    if (initializationStarted.current || metadataFetched.current) {
+      console.log("❌ useV1Lab useEffect skipped - already initialized");
       return;
     }
 
-    let mounted = true;
-    isInitializing.current = true;
+    // If we don't expect containers, skip connection attempts
+    if (!expectContainers) {
+      console.log("❌ useV1Lab useEffect skipped - expectContainers is false");
+      setLoading(false);
+      setIsConnected(false);
+      initializationStarted.current = true;
+      return;
+    }
+
+    console.log("✅ useV1Lab useEffect proceeding with initialization");
+    initializationStarted.current = true; // Mark as started to prevent re-runs
+
+    const initializeFileSystem = async () => {
+      try {
+        // Check if we have cached data first
+        if (globalQuestMetaCache && globalQuestMetaCache.files) {
+          console.log("💾 Using cached metadata");
+          const tree = buildFileTree(globalQuestMetaCache.files);
+          if (mountedRef.current) {
+            setFileTree(tree);
+            setIsConnected(true);
+            setLoading(false);
+            metadataFetched.current = true;
+          }
+          return;
+        }
+
+        // If no cache, check if global initialization is in progress
+        if (globalInitializationPromise) {
+          console.log("⏳ Waiting for global initialization to complete");
+          await globalInitializationPromise;
+          
+          // After global init, check cache again
+          if (globalQuestMetaCache && globalQuestMetaCache.files && mountedRef.current) {
+            const tree = buildFileTree(globalQuestMetaCache.files);
+            setFileTree(tree);
+            setIsConnected(true);
+            setLoading(false);
+            metadataFetched.current = true;
+          }
+          return;
+        }
+
+        // Start new global initialization
+        globalInitializationPromise = initializeConnection();
+        await globalInitializationPromise;
+        globalInitializationPromise = null;
+
+      } catch (error) {
+        console.error("Failed to initialize file system:", error);
+        if (mountedRef.current) {
+          setError("Failed to initialize file system");
+          setLoading(false);
+        }
+        // Reset refs on error so we can retry
+        initializationStarted.current = false;
+        globalInitializationPromise = null;
+      }
+    };
 
     const initializeConnection = async () => {
+      console.log("🚀 initializeConnection function called");
       try {
-        setLoading(true);
-        setError(null);
-        setConnectionError(null);
+        if (mountedRef.current) {
+          setLoading(true);
+          setError(null);
+          setConnectionError(null);
+        }
 
-        console.log("Connecting to filesystem...");
+        console.log("🔌 Connecting to filesystem...");
 
         // Check service availability using centralized connection manager
         const result = await connectionManager.checkServiceAvailability(socketUrl, 'file system');
@@ -219,49 +298,95 @@ export const useFileSystem = (
 
         // Service is available, now connect WebSocket
         await fsSocket.connect(socketUrl);
+        console.log("WebSocket connected successfully to:", socketUrl);
 
-        if (!mounted) return;
+        if (!mountedRef.current) return;
         setIsConnected(true);
+        setLoading(false); // Stop loading immediately when connected
 
-        // Initialize Client
+        // Initialize Client first
         const initializeClient = async () => {
           try {
             await fsSocket.sendMessage(FS_INITIALIZE_CLIENT, {
               language: params.language,
               labId: params.labId,
             });
+            console.log("Client initialized successfully");
           } catch (error) {
             console.error("Failed to initialize client:", error);
           }
         };
-       const initResponse = await initializeClient();
-        console.log("Client initialized:", initResponse);
-        if (globalQuestMetaCache) {
+        
+        await initializeClient();
+
+        // Check if we have cached data first
+        console.log("Checking for cached data:", {
+          hasCache: !!globalQuestMetaCache,
+          globalMetaFetched,
+          initialized: initialized.current
+        });
+
+        if (globalQuestMetaCache && !initialized.current) {
+          console.log("Using cached quest metadata");
           const tree = buildFileTree(globalQuestMetaCache.files);
           setFileTree(tree);
           directoryCache.current[""] = globalQuestMetaCache.files;
           initialized.current = true;
-          console.log("Using cached quest metadata");
-        } else {
-          console.log("Fetching initial quest metadata...");
-          const questData: QuestMetaResponse = await fsSocket.sendMessage(
-            FS_FETCH_QUEST_META,
-            { path: "" },
-            socketUrl
-          );
+          return;
+        }
 
-          if (!mounted) return;
-          console.log("Quest metadata received:", questData);
-          const tree = buildFileTree(questData.files);
-          setFileTree(tree);
+        // Only fetch meta if we haven't fetched it globally
+        console.log("Checking if we should fetch metadata:", {
+          globalMetaFetched,
+          shouldFetch: !globalMetaFetched
+        });
 
-          directoryCache.current[""] = questData.files;
-          globalQuestMetaCache = questData;
-          initialized.current = true;
+        if (!globalMetaFetched) {
+          globalMetaFetched = true;
+          console.log("Fetching quest metadata for the first time...");
+
+          try {
+            const questData: QuestMetaResponse = await fsSocket.sendMessage(
+              FS_FETCH_QUEST_META,
+              { path: "" },
+              socketUrl
+            );
+
+            if (!mountedRef.current) return;
+            console.log("📨 Quest metadata received:", questData);
+            console.log("📁 Files in questData:", questData.files?.length || 0);
+            const tree = buildFileTree(questData.files);
+            console.log("🌳 Built file tree:", tree);
+            console.log("🔑 File tree keys:", Object.keys(tree));
+            setFileTree(tree);
+            console.log("✅ fileTree state updated with keys:", Object.keys(tree));
+            directoryCache.current[""] = questData.files;
+            globalQuestMetaCache = questData; // Cache globally
+            initialized.current = true;
+          } catch (questError) {
+            console.error("Failed to fetch quest metadata:", questError);
+            globalMetaFetched = false; // Reset flag on error so we can retry
+            // Set a basic file tree even if quest metadata fails
+            const basicTree = {
+              'src': {
+                type: 'folder',
+                children: {
+                  'index.html': { type: 'file', path: 'src/index.html', isDir: false },
+                  'styles.css': { type: 'file', path: 'src/styles.css', isDir: false },
+                  'script.js': { type: 'file', path: 'src/script.js', isDir: false }
+                },
+                path: 'src',
+                isDir: true
+              }
+            };
+            setFileTree(basicTree);
+            console.log("Set basic file tree due to quest metadata failure");
+            initialized.current = true;
+          }
         }
       } catch (err: any) {
         console.error("Failed to initialize filesystem:", err);
-        if (!mounted) return;
+        if (!mountedRef.current) return;
 
         const errMsgRaw = err.message || err.toString();
 
@@ -275,20 +400,23 @@ export const useFileSystem = (
         setLoading(false);
         return;
       } finally {
-        if (mounted && isConnected) {
+        if (mountedRef.current) {
+          // Always stop loading here - we either connected or failed
           setLoading(false);
           isInitializing.current = false;
         }
       }
     };
 
-    initializeConnection();
+    console.log("🎯 About to call initializeFileSystem()");
+    initializeFileSystem();
 
     return () => {
-      mounted = false;
-      isInitializing.current = false;
+      mountedRef.current = false;
+      // Reset refs so we can reinitialize if component remounts
+      initializationStarted.current = false;
     };
-  }, [expectContainers]); // Add expectContainers as dependency
+  }, [expectContainers, socketUrl]); // Minimal dependencies to prevent excessive re-renders
 
   const loadDirectory = useCallback(
     async (path: string): Promise<FileInfo[]> => {
@@ -718,6 +846,19 @@ export const useFileSystem = (
     },
     [fileTree, fileContents]
   ); // Add dependencies for optimistic updates
+
+  // Cleanup effect to reset flags on unmount
+  useEffect(() => {
+    return () => {
+      mountedRef.current = false;
+      initializationStarted.current = false;
+      metadataFetched.current = false;
+      metaFetched.current = false;
+      initialized.current = false;
+      isInitializing.current = false;
+      connectionInitiated.current = false;
+    };
+  }, []);
 
   return {
     isConnected,

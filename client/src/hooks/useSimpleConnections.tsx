@@ -17,14 +17,13 @@ export function useSimpleConnections({
   language,
   fsActive,
   ptyActive,
-  maxRetries = 10,
-  retryDelay = 2000, // 2 seconds between retries
+  maxRetries = 8, // Reduced from 10 to 8
+  retryDelay = 1500, // Reduced from 2000 to 1500ms for faster retries
 }: UseSimpleConnectionsOptions) {
   const [fsConnected, setFsConnected] = useState(false);
   const [ptyConnected, setPtyConnected] = useState(false);
   const [fsError, setFsError] = useState<string | null>(null);
   const [ptyError, setPtyError] = useState<string | null>(null);
-  const [isReady, setIsReady] = useState(false);
   
   const fsRetries = useRef(0);
   const ptyRetries = useRef(0);
@@ -107,10 +106,10 @@ export function useSimpleConnections({
 
     // Attempt FS connection with retries
     const retryFS = async (): Promise<boolean> => {
-      if (!mounted.current || fsConnected) return fsConnected;
+      if (!mounted.current || fsConnected || shouldStopRetrying) return fsConnected;
       
       for (let i = 0; i < maxRetries; i++) {
-        if (!mounted.current) return false;
+        if (!mounted.current || shouldStopRetrying) return fsConnected;
         
         fsRetries.current = i + 1;
         const success = await connectToFS();
@@ -131,10 +130,10 @@ export function useSimpleConnections({
 
     // Attempt PTY connection with retries
     const retryPTY = async (): Promise<boolean> => {
-      if (!mounted.current || ptyConnected) return ptyConnected;
+      if (!mounted.current || ptyConnected || shouldStopRetrying) return ptyConnected;
       
       for (let i = 0; i < maxRetries; i++) {
-        if (!mounted.current) return false;
+        if (!mounted.current || shouldStopRetrying) return ptyConnected;
         
         ptyRetries.current = i + 1;
         const success = await connectToPTY();
@@ -157,7 +156,6 @@ export function useSimpleConnections({
     const [fsSuccess, ptySuccess] = await Promise.all([retryFS(), retryPTY()]);
 
     if (mounted.current && fsSuccess && ptySuccess) {
-      setIsReady(true);
       console.log('All connections established successfully');
     }
   }, [connectToFS, connectToPTY, maxRetries, retryDelay, fsActive, ptyActive]); // Removed fsConnected and ptyConnected from dependencies
@@ -169,9 +167,8 @@ export function useSimpleConnections({
   useEffect(() => {
     if (fsActive && ptyActive && !connectionAttempted.current) {
       connectionAttempted.current = true;
-      setTimeout(() => {
-        attemptConnectionsRef.current?.();
-      }, 1000); // Small delay to ensure services are fully ready
+      // Immediate connection attempt - no artificial delay
+      attemptConnectionsRef.current?.();
     }
   }, [fsActive, ptyActive]); // Removed attemptConnections from dependencies to prevent re-running
 
@@ -190,7 +187,21 @@ export function useSimpleConnections({
   }, []);
 
   // Check if both services are ready
-  const bothServicesActive = fsActive && ptyActive;
+  // If connections are successful, consider it ready regardless of progress log status
+  const isReady = fsConnected && ptyConnected;
+  
+  // Stop retrying once connections are established
+  const shouldStopRetrying = fsConnected && ptyConnected;
+  
+  // Debug logging
+  console.log('useSimpleConnections FINAL STATE:', {
+    fsConnected,
+    ptyConnected,
+    isReady,
+    fsActive,
+    ptyActive,
+    shouldStopRetrying
+  });
 
   return {
     // Connection states
@@ -198,12 +209,12 @@ export function useSimpleConnections({
     ptyConnected,
     fsError,
     ptyError,
-    isReady: isReady && fsConnected && ptyConnected,
+    isReady,
     
     // Service states
     fsActive,
     ptyActive,
-    bothServicesActive,
+    bothServicesActive: fsActive && ptyActive,
     
     // Retry info
     fsRetries: fsRetries.current,

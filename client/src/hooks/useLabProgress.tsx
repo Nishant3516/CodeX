@@ -23,14 +23,16 @@ interface UseLabProgressOptions {
   onActive?: () => void;
   pollingInterval?: number;
   maxRetries?: number;
+  stopWhenReady?: boolean; // New option to stop polling when connections are ready
 }
 
 export function useLabProgress({
   labId,
   language,
   onActive,
-  pollingInterval = 3000, // 3 seconds - gentle on Redis
-  maxRetries = 10 // Only 10 retries max to limit API calls
+  pollingInterval = 2000, // Reduced from 3 seconds to 2 seconds for faster response
+  maxRetries = 8, // Reduced from 10 to 8
+  stopWhenReady = false
 }: UseLabProgressOptions) {
   const [data, setData] = useState<LabProgressData | null>(null);
   const [loading, setLoading] = useState(true);
@@ -166,6 +168,13 @@ export function useLabProgress({
           const ptyActive = progressData.progressLogs.some(
             log => log.ServiceName === 'pty' && log.Status === 'active'
           );
+
+          console.log('useLabProgress debug:', {
+            status: progressData.status,
+            progressLogs: progressData.progressLogs,
+            fsActive,
+            ptyActive
+          });
 
           if (fsActive && ptyActive) {
             if (pollInterval.current) {

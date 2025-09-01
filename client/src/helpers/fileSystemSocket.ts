@@ -23,8 +23,9 @@ class FileSystemSocket {
   private connectionPromise: Promise<void> | null = null;
   private isConnecting = false;
   private reconnectAttempts = 0;
-  private maxReconnectAttempts = 10;
+  private maxReconnectAttempts = Infinity;
   private reconnectDelay = 300;
+  private shouldReconnect = true;
   // Toggle detailed debug logging for handshake/correlation issues
   private debug = false;
 
@@ -86,6 +87,7 @@ async  checkIfAvailable(url: string): Promise<boolean> {
     }
 
     this.isConnecting = true;
+    this.shouldReconnect = true;
     this.connectionPromise = new Promise((resolve, reject) => {
       try {
         this.ws = new WebSocket(url);
@@ -100,6 +102,7 @@ async  checkIfAvailable(url: string): Promise<boolean> {
           console.log("FS WebSocket connected");
           this.isConnecting = false;
           this.reconnectAttempts = 0;
+          this.shouldReconnect = true;
           this.connectionPromise = null;
           resolve();
         };
@@ -121,8 +124,8 @@ async  checkIfAvailable(url: string): Promise<boolean> {
           this.isConnecting = false;
           this.connectionPromise = null;
           
-          // Auto-reconnect if not a normal closure and we haven't exceeded max attempts
-          if (event.code !== 1000 && event.code !== 1001 && this.reconnectAttempts < this.maxReconnectAttempts) {
+          // Auto-reconnect if not a normal closure, we should reconnect, and we haven't exceeded max attempts
+          if (event.code !== 1000 && event.code !== 1001 && this.shouldReconnect && this.reconnectAttempts < this.maxReconnectAttempts) {
             this.reconnectAttempts++;
             const delay = this.reconnectDelay * Math.pow(2, this.reconnectAttempts - 1); // Exponential backoff
             console.log(`Attempting to reconnect (${this.reconnectAttempts}/${this.maxReconnectAttempts}) in ${delay}ms`);
@@ -130,12 +133,12 @@ async  checkIfAvailable(url: string): Promise<boolean> {
             setTimeout(() => {
               this.connect(url).catch((err) => {
                 console.error(`Reconnection attempt ${this.reconnectAttempts} failed:`, err);
-                if (this.reconnectAttempts >= this.maxReconnectAttempts) {
+                if (this.reconnectAttempts >= this.maxReconnectAttempts && this.maxReconnectAttempts !== Infinity) {
                   console.error("Max reconnection attempts exceeded. Connection failed permanently.");
                 }
               });
             }, delay);
-          } else if (this.reconnectAttempts >= this.maxReconnectAttempts) {
+          } else if (this.reconnectAttempts >= this.maxReconnectAttempts && this.maxReconnectAttempts !== Infinity) {
             console.error("Max reconnection attempts exceeded. Connection failed permanently.");
           }
         };
@@ -323,7 +326,8 @@ async  checkIfAvailable(url: string): Promise<boolean> {
 
   disconnect() {
     if (this.ws) {
-      this.reconnectAttempts = this.maxReconnectAttempts; // Prevent reconnection
+      // Set a flag to prevent reconnection instead of setting reconnectAttempts to Infinity
+      this.shouldReconnect = false;
       this.ws.close(1000, 'Normal closure');
       this.ws = null;
     }

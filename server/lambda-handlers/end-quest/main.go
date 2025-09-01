@@ -8,6 +8,7 @@ import (
 	"os"
 
 	"lms_v0/k8s"
+	"lms_v0/utils"
 
 	"github.com/aws/aws-lambda-go/events"
 	"github.com/aws/aws-lambda-go/lambda"
@@ -55,6 +56,8 @@ func handler(ctx context.Context, req events.APIGatewayProxyRequest) (events.API
 		log.Printf("start-quest: provisioning failed: %v", err)
 		return events.APIGatewayProxyResponse{StatusCode: 500, Body: fmt.Sprintf(`{"error":"Tearing Down failed: %s"}`, err.Error())}, nil
 	}
+
+	utils.RedisUtilsInstance.RemoveLabInstance(payload.LabID)
 
 	resp := map[string]any{"success": true, "labId": payload.LabID, "message": "Removing Pods started"}
 	b, _ := json.Marshal(resp)
