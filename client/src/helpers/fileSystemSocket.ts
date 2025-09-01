@@ -279,7 +279,7 @@ async  checkIfAvailable(url: string): Promise<boolean> {
         return;
       }
 
-      // Set timeout for request
+      // Set timeout for request - reduced from 15s to 8s for faster failures
       const timeout = setTimeout(() => {
         if (this.requestCallbacks.has(request_id)) {
           this.requestCallbacks.delete(request_id);
@@ -288,7 +288,7 @@ async  checkIfAvailable(url: string): Promise<boolean> {
           this.pendingByType.set(responseType, updated);
           reject(new Error("Request timeout"));
         }
-      }, 15000); // Increased timeout
+      }, 8000); // Reduced timeout for faster failures
 
       // replace stored resolve/reject with timeout attached so close handlers can clear it
       this.requestCallbacks.set(request_id, { resolve: (data) => { clearTimeout(timeout); resolve(data); }, reject: (err) => { clearTimeout(timeout); reject(err); } });

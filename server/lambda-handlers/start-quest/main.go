@@ -82,24 +82,20 @@ func handler(ctx context.Context, req events.APIGatewayProxyRequest) (events.API
 
 	sourceKey := fmt.Sprintf("boilerplate/%s", payload.Language)
 
-	// Start S3 copy operation asynchronously
-	go func() {
-		copyCtx := context.Background()
-		err := utils.CopyS3FolderAsync(copyCtx, sourceKey, destinationKey)
-		if err != nil {
-			log.Printf("start-quest: async copy failed: %v", err)
-			// Update lab status to error
-			errorProgress := utils.LabProgressEntry{
-				Timestamp:   time.Now().Unix(),
-				Status:      utils.Error,
-				Message:     fmt.Sprintf("Failed to copy files: %v", err),
-				ServiceName: utils.S3_SERVICE,
-			}
-			utils.RedisUtilsInstance.UpdateLabInstanceProgress(payload.LabID, errorProgress)
-			return
+	err = utils.CopyS3Folder(sourceKey, destinationKey)
+	if err != nil {
+		log.Printf("start-quest: async copy failed: %v", err)
+		// Update lab status to error
+		errorProgress := utils.LabProgressEntry{
+			Timestamp:   time.Now().Unix(),
+			Status:      utils.Error,
+			Message:     fmt.Sprintf("Failed to copy files: %v", err),
+			ServiceName: utils.S3_SERVICE,
 		}
-		log.Printf("start-quest: async copy completed successfully for %s", payload.LabID)
-	}()
+		utils.RedisUtilsInstance.UpdateLabInstanceProgress(payload.LabID, errorProgress)
+		return events.APIGatewayProxyResponse{StatusCode: 500, Body: fmt.Sprintf(`{"error":"Async copy failed: %s"}`, err.Error())}, nil
+	}
+	log.Printf("start-quest:  copy completed successfully for %s", payload.LabID)
 
 	params := k8s.SpinUpParams{
 		LabID:                 payload.LabID,

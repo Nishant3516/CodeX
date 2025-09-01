@@ -41,6 +41,7 @@ func (s *Server) RegisterRoutes() http.Handler {
 
 	r.HandlerFunc(http.MethodPost, "/v1/start/quest", s.StartLabHandler)
 	r.HandlerFunc(http.MethodPost, "/v1/end/quest", s.EndLabHandler)
+	r.HandlerFunc(http.MethodDelete, "/v1/delete/quest", s.DeleteLabHandler)
 
 	return corsWrapper
 }
@@ -287,4 +288,54 @@ func (s *Server) AddProjectHandler(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	log.Printf("Quest added successfully with slug: %s and %v", slug, response)
 	_ = json.NewEncoder(w).Encode(response)
+}
+
+func (s *Server) DeleteLabHandler(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Language string `json:"language"`
+		LabID    string `json:"labId"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Invalid JSON payload", http.StatusBadRequest)
+		return
+	}
+
+	language := req.Language
+	labId := req.LabID
+
+	if language == "" {
+		http.Error(w, "Missing language parameter", http.StatusBadRequest)
+		return
+	}
+
+	if labId == "" {
+		http.Error(w, "Missing labId parameter", http.StatusBadRequest)
+		return
+	}
+
+	log.Printf("Deleting lab data for LabID: %s, Language: %s", labId, language)
+
+	// Delete the folder from R2/S3
+	err := utils.DeleteR2Folder(language, labId)
+	if err != nil {
+		log.Printf("Failed to delete lab data from R2: %v", err)
+		http.Error(w, fmt.Sprintf("Failed to delete lab data: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	// Remove from Redis if it exists
+	utils.RedisUtilsInstance.RemoveLabInstance(labId)
+
+	response := map[string]interface{}{
+		"message":  "Lab data deleted successfully",
+		"labId":    labId,
+		"language": language,
+		"success":  true,
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	if err := json.NewEncoder(w).Encode(response); err != nil {
+		log.Printf("Error encoding delete response: %v", err)
+	}
 }

@@ -283,9 +283,9 @@ export const useFileSystem = (
 
         if (!result.available) {
           if (connectionManager.startAttempted) {
-            // Service is starting up, wait a bit more
+            // Service is starting up, show appropriate message
             setError('Development environment is starting up...');
-            await new Promise(resolve => setTimeout(resolve, 5000)); // Increased from 3 to 5 seconds
+            setLoading(false); // Don't keep loading spinner
             return;
           }
 
@@ -345,43 +345,56 @@ export const useFileSystem = (
           globalMetaFetched = true;
           console.log("Fetching quest metadata for the first time...");
 
-          try {
-            const questData: QuestMetaResponse = await fsSocket.sendMessage(
-              FS_FETCH_QUEST_META,
-              { path: "" },
-              socketUrl
-            );
+          // Retry logic specifically for quest metadata
+          let retryCount = 0;
+          const maxRetries = 2;
+          
+          while (retryCount <= maxRetries) {
+            try {
+              console.log(`🔄 Fetching quest metadata (attempt ${retryCount + 1}/${maxRetries + 1})`);
+              
+              const questData: QuestMetaResponse = await fsSocket.sendMessage(
+                FS_FETCH_QUEST_META,
+                { path: "" },
+                socketUrl
+              );
 
-            if (!mountedRef.current) return;
-            console.log("📨 Quest metadata received:", questData);
-            console.log("📁 Files in questData:", questData.files?.length || 0);
-            const tree = buildFileTree(questData.files);
-            console.log("🌳 Built file tree:", tree);
-            console.log("🔑 File tree keys:", Object.keys(tree));
-            setFileTree(tree);
-            console.log("✅ fileTree state updated with keys:", Object.keys(tree));
-            directoryCache.current[""] = questData.files;
-            globalQuestMetaCache = questData; // Cache globally
-            initialized.current = true;
-          } catch (questError) {
-            console.error("Failed to fetch quest metadata:", questError);
-            globalMetaFetched = false; // Reset flag on error so we can retry
-            // Set a basic file tree even if quest metadata fails
-            const basicTree = {
-              'src': {
-                type: 'folder',
-                children: {
-                  'index.html': { type: 'file', path: 'src/index.html', isDir: false },
-                  'styles.css': { type: 'file', path: 'src/styles.css', isDir: false },
-                  'script.js': { type: 'file', path: 'src/script.js', isDir: false }
-                },
-                path: 'src',
-                isDir: true
+              if (!mountedRef.current) return;
+              console.log("📨 Quest metadata received:", questData);
+              console.log("📁 Files in questData:", questData.files?.length || 0);
+              
+              if (questData.files && questData.files.length > 0) {
+                const tree = buildFileTree(questData.files);
+                console.log("🌳 Built file tree:", tree);
+                console.log("🔑 File tree keys:", Object.keys(tree));
+                setFileTree(tree);
+                console.log("✅ fileTree state updated with keys:", Object.keys(tree));
+                directoryCache.current[""] = questData.files;
+                globalQuestMetaCache = questData; // Cache globally
+                initialized.current = true;
+                setLoading(false); // Success - stop loading
+                return; // Success, exit retry loop
+              } else {
+                console.warn("No files received from server");
+                throw new Error("No files received from server");
               }
-            };
-            setFileTree(basicTree);
-            console.log("Set basic file tree due to quest metadata failure");
-            initialized.current = true;
+            } catch (questError) {
+              console.error(`Failed to fetch quest metadata (attempt ${retryCount + 1}):`, questError);
+              
+              if (retryCount < maxRetries) {
+                retryCount++;
+                console.log(`⏳ Retrying in 2 seconds... (${retryCount}/${maxRetries})`);
+                await new Promise(resolve => setTimeout(resolve, 2000));
+              } else {
+                // Final failure - show error, no mock data
+                console.error("All retry attempts failed for quest metadata");
+                globalMetaFetched = false; // Reset flag so user can retry manually
+                setError("Failed to load project files. Please refresh the page to try again.");
+                setLoading(false);
+                initialized.current = false;
+                return;
+              }
+            }
           }
         }
       } catch (err: any) {

@@ -13,6 +13,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/credentials"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
+	"github.com/aws/aws-sdk-go-v2/service/s3/types"
 )
 
 func GeneratePresignedUrl(bucketName, objectKey string) (string, error) {
@@ -372,6 +373,113 @@ func processCopyBatchAsync(ctx context.Context, copyObjects []s3.CopyObjectInput
 	// Wait for all operations to complete
 	var firstError error
 	for i := 0; i < len(copyObjects); i++ {
+		if err := <-errChan; err != nil && firstError == nil {
+			firstError = err
+		}
+	}
+
+	return firstError
+}
+
+// DeleteR2Folder deletes all objects in a specific folder path from R2/S3
+func DeleteR2Folder(language, labId string) error {
+	ctx := context.TODO()
+	bucket := os.Getenv("AWS_S3_BUCKET_NAME")
+
+	if bucket == "" {
+		log.Println("AWS_S3_BUCKET_NAME must be set")
+		return fmt.Errorf("AWS_S3_BUCKET_NAME must be set")
+	}
+
+	// Construct the folder path to delete
+	folderKey := fmt.Sprintf("code/%s/%s/", language, labId)
+
+	log.Printf("Starting deletion of folder: s3://%s/%s", bucket, folderKey)
+
+	// List all objects in the folder
+	listInput := &s3.ListObjectsV2Input{
+		Bucket:  &bucket,
+		Prefix:  &folderKey,
+		MaxKeys: awsMethods.Int32(1000),
+	}
+
+	var deleteObjects []types.ObjectIdentifier
+	totalObjects := 0
+
+	// Collect all objects to delete
+	paginator := s3.NewListObjectsV2Paginator(aws.S3Client, listInput)
+	for paginator.HasMorePages() {
+		page, err := paginator.NextPage(ctx)
+		if err != nil {
+			return fmt.Errorf("failed to list objects for deletion: %w", err)
+		}
+
+		for _, obj := range page.Contents {
+			deleteObjects = append(deleteObjects, types.ObjectIdentifier{
+				Key: obj.Key,
+			})
+			totalObjects++
+
+			// Process in batches of 1000 objects (S3 limit)
+			if len(deleteObjects) >= 1000 {
+				if err := processDeleteBatch(ctx, bucket, deleteObjects); err != nil {
+					return fmt.Errorf("failed to process delete batch: %w", err)
+				}
+				deleteObjects = deleteObjects[:0] // Reset for next batch
+			}
+		}
+	}
+
+	// Process remaining objects
+	if len(deleteObjects) > 0 {
+		if err := processDeleteBatch(ctx, bucket, deleteObjects); err != nil {
+			return fmt.Errorf("failed to process final delete batch: %w", err)
+		}
+	}
+
+	log.Printf("Successfully deleted %d objects from folder: %s", totalObjects, folderKey)
+	return nil
+}
+
+// processDeleteBatch handles the actual deletion of objects in batches
+func processDeleteBatch(ctx context.Context, bucket string, deleteObjects []types.ObjectIdentifier) error {
+	const maxConcurrency = 10
+	semaphore := make(chan struct{}, maxConcurrency)
+	errChan := make(chan error, len(deleteObjects))
+
+	// Split into smaller batches for concurrent deletion
+	batchSize := 100 // AWS S3 delete objects limit per request
+	for i := 0; i < len(deleteObjects); i += batchSize {
+		end := i + batchSize
+		if end > len(deleteObjects) {
+			end = len(deleteObjects)
+		}
+
+		batch := deleteObjects[i:end]
+
+		go func(objects []types.ObjectIdentifier) {
+			semaphore <- struct{}{}        // Acquire semaphore
+			defer func() { <-semaphore }() // Release semaphore
+
+			deleteInput := &s3.DeleteObjectsInput{
+				Bucket: &bucket,
+				Delete: &types.Delete{
+					Objects: objects,
+				},
+			}
+
+			_, err := aws.S3Client.DeleteObjects(ctx, deleteInput)
+			if err != nil {
+				errChan <- fmt.Errorf("failed to delete objects batch: %w", err)
+				return
+			}
+			errChan <- nil
+		}(batch)
+	}
+
+	// Wait for all batches to complete
+	var firstError error
+	for i := 0; i < (len(deleteObjects)+batchSize-1)/batchSize; i++ {
 		if err := <-errChan; err != nil && firstError == nil {
 			firstError = err
 		}

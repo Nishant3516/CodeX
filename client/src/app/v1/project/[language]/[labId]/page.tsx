@@ -435,7 +435,7 @@ export default function V1ProjectPage() {
 
   // NOW WE CAN HAVE CONDITIONAL RETURNS - ALL HOOKS ARE ABOVE THIS LINE
 
-  // Show loading screen until connections are established (not waiting for file tree)
+  // Show loading screen until connections are established AND file tree is loaded
   console.log('Main page debug:', {
     isReady,
     fileTreeKeys: Object.keys(fileTree),
@@ -445,7 +445,7 @@ export default function V1ProjectPage() {
     ptyConnected
   });
   
-  if (!isReady) {
+  if (!isReady || loading || Object.keys(fileTree).length === 0) {
     return (
       <LoadingScreen
         language={language}
