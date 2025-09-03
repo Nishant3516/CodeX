@@ -132,7 +132,7 @@ func UpdateLabInstanceProgress(labID string, progress LabProgressEntry) {
 	if runnerActive && ptyActive {
 		monitoringEntry := LabMonitoringEntry{
 			LabID:         instance.LabID,
-			Status:        Active,
+			Status:        Booting,
 			LastUpdatedAt: instance.LastUpdatedAt,
 			CreatedAt:     instance.CreatedAt,
 		}

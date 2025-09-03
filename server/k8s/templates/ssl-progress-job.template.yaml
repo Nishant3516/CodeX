@@ -1,0 +1,28 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: '{{.LabID}}-ssl-progress-job'
+  namespace: devsarena
+spec:
+  template:
+    spec:
+      containers:
+      - name: check-and-update
+        image: alpine:latest
+        command:
+        - sh
+        - -c
+        - |
+          apk add --no-cache curl
+          HOST="{{.LabID}}.devsarena.in"
+          echo "$(date): Starting SSL progress check for $HOST"
+          while true; do
+            HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" https://$HOST --max-time 10)
+            echo "$(date): HTTP response code: $HTTP_CODE"
+            if echo "$HTTP_CODE" | grep -q "^\(200\|502\)$"; then
+              echo "$(date): Host reachable, exiting"
+              exit 0
+            fi
+            sleep 5
+          done
+      restartPolicy: OnFailure

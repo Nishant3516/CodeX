@@ -5,9 +5,8 @@ metadata:
   namespace: devsarena
   annotations:
     nginx.ingress.kubernetes.io/enable-cors: "true"
-    cert-manager.io/cluster-issuer: "letsencrypt-prod" 
     nginx.ingress.kubernetes.io/ssl-redirect: "true"
-    nginx.ingress.kubernetes.io/cors-allow-origin: "https://devsarena.in,https://staging.devsarena.in,http://localhost:3000,http://localhost:3001,http://127.0.0.1:3000,http://127.0.0.1:3001"
+    nginx.ingress.kubernetes.io/cors-allow-origin: "https://devsarena.in,https://staging.devsarena.in,https://staging2.devsarena.in,http://localhost:3000,http://localhost:3001,http://127.0.0.1:3000,http://127.0.0.1:3001"
     nginx.ingress.kubernetes.io/cors-allow-methods: "GET, PUT, POST, DELETE, PATCH, OPTIONS, HEAD"
     nginx.ingress.kubernetes.io/cors-allow-headers: "DNT,User-Agent,X-Requested-With,If-Modified-Since,Cache-Control,Content-Type,Range"
     # This annotation is needed for WebSocket connections to work properly
@@ -18,12 +17,8 @@ metadata:
     nginx.ingress.kubernetes.io/proxy-next-upstream-timeout: "30"
 spec:
   ingressClassName: nginx
-  tls:
-  - hosts:
-    - '{{.LabID}}.quest.arenas.devsarena.in' 
-    secretName: '{{.LabID}}-tls-secret' 
   rules:
-    - host: '{{.LabID}}.quest.arenas.devsarena.in'
+    - host: '{{.LabID}}.devsarena.in'
       http:
         paths:
           # WebSocket routes for runner service (must come first to avoid conflicts)
@@ -48,40 +43,3 @@ spec:
                 name: '{{.LabID}}-service'
                 port:
                   name: app-vite-dev
----
-apiVersion: batch/v1
-kind: Job
-metadata:
-  name: '{{.LabID}}-ssl-progress-job'
-  namespace: devsarena
-spec:
-  template:
-    spec:
-      containers:
-      - name: check-and-update
-        image: alpine:latest
-        env:
-          - name: REDIS_URI
-            valueFrom:
-              secretKeyRef:
-                name: aws-secrets
-                key: REDIS_URI
-        command:
-        - sh
-        - -c
-        - |
-          apk add --no-cache curl redis jq kubectl
-          HOST="{{.LabID}}.quest.arenas.devsarena.in"
-          while true; do
-            if kubectl get secret {{.LabID}}-tls-secret -n devsarena >/dev/null 2>&1 && curl --max-time 5 --silent --head https://$HOST >/dev/null 2>&1; then
-              TIMESTAMP=$(date +%s)
-              CURRENT=$(redis-cli -u $REDIS_URI HGET lab_instances {{.LabID}})
-              if [ -n "$CURRENT" ]; then
-                UPDATED=$(echo "$CURRENT" | jq --arg ts "$TIMESTAMP" '.ProgressLogs += [{"ServiceName": "ssl", "Status": "active", "Timestamp": ($ts | tonumber), "Message": "SSL active"}]')
-                redis-cli -u $REDIS_URI HSET lab_instances {{.LabID}} "$UPDATED"
-              fi
-              exit 0
-            fi
-            sleep 10
-          done
-      restartPolicy: OnFailure
