@@ -6,7 +6,7 @@ metadata:
   annotations:
     nginx.ingress.kubernetes.io/enable-cors: "true"
     nginx.ingress.kubernetes.io/ssl-redirect: "true"
-    nginx.ingress.kubernetes.io/cors-allow-origin: "https://devsarena.in,https://staging.devsarena.in,https://staging2.devsarena.in,http://localhost:3000,http://localhost:3001,http://127.0.0.1:3000,http://127.0.0.1:3001"
+    nginx.ingress.kubernetes.io/cors-allow-origin: "https://devsarena.in,https://www.devsarena.in,https://staging.devsarena.in,https://staging2.devsarena.in,http://localhost:3000,http://localhost:3001,http://127.0.0.1:3000,http://127.0.0.1:3001"
     nginx.ingress.kubernetes.io/cors-allow-methods: "GET, PUT, POST, DELETE, PATCH, OPTIONS, HEAD"
     nginx.ingress.kubernetes.io/cors-allow-headers: "DNT,User-Agent,X-Requested-With,If-Modified-Since,Cache-Control,Content-Type,Range"
     # This annotation is needed for WebSocket connections to work properly
