@@ -67,6 +67,9 @@ func SpinUpPodWithLanguage(params SpinUpParams) error {
 	if err := CreateSSLProgressJobFromYamlIfDoesNotExists(params); err != nil {
 		return fmt.Errorf("could not create SSL progress job: %w", err)
 	}
+	if err := CreateCleanupCronJobFromYamlIfDoesNotExists(params); err != nil {
+		return fmt.Errorf("could not create cleanup cronjob: %w", err)
+	}
 
 	log.Printf("Successfully spun up all resources for LabID: %s", params.LabID)
 	return nil
@@ -297,6 +300,173 @@ func CreateSSLProgressJobFromYamlIfDoesNotExists(params SpinUpParams) error {
 	return nil
 }
 
+func CreateCleanupCronJobFromYamlIfDoesNotExists(params SpinUpParams) error {
+	// First create the ConfigMap if it doesn't exist
+	if err := CreateCleanupConfigMapIfDoesNotExists(); err != nil {
+		return fmt.Errorf("could not create cleanup configmap: %w", err)
+	}
+
+	// Create the Secret if it doesn't exist
+	if err := CreateCleanupSecretIfDoesNotExists(); err != nil {
+		return fmt.Errorf("could not create cleanup secret: %w", err)
+	}
+
+	yamlFilePath := "k8s/templates/cleanup-cronjob.template.yaml"
+	cronJobName := "lab-cleanup-cronjob"
+
+	_, err := ClientSet.BatchV1().CronJobs(params.Namespace).Get(context.TODO(), cronJobName, metav1.GetOptions{})
+	if err == nil {
+		log.Printf("Shared cleanup CronJob '%s' already exists, skipping.", cronJobName)
+		return nil
+	}
+	if !errors.IsNotFound(err) {
+		return err
+	}
+
+	var processedYaml bytes.Buffer
+	tmpl, err := template.ParseFiles(yamlFilePath)
+	if err != nil {
+		return err
+	}
+	if err := tmpl.Execute(&processedYaml, params); err != nil {
+		return err
+	}
+
+	var cronJob batchv1.CronJob
+	if err := yaml.Unmarshal(processedYaml.Bytes(), &cronJob); err != nil {
+		return fmt.Errorf("error unmarshalling cronjob YAML: %w", err)
+	}
+
+	log.Printf("Creating shared cleanup cronjob '%s'", cronJob.Name)
+	_, err = ClientSet.BatchV1().CronJobs(params.Namespace).Create(context.TODO(), &cronJob, metav1.CreateOptions{})
+	if err != nil {
+		return err
+	}
+
+	log.Printf("Shared cleanup cronjob '%s' created successfully", cronJob.Name)
+
+	return nil
+}
+
+func CreateCleanupConfigMapIfDoesNotExists() error {
+	yamlFilePath := "k8s/templates/cleanup-configmap.template.yaml"
+	configMapName := "lab-cleanup-config"
+	namespace := "devsarena"
+
+	_, err := ClientSet.CoreV1().ConfigMaps(namespace).Get(context.TODO(), configMapName, metav1.GetOptions{})
+	if err == nil {
+		log.Printf("Cleanup ConfigMap '%s' already exists, skipping.", configMapName)
+		return nil
+	}
+	if !errors.IsNotFound(err) {
+		return err
+	}
+
+	var processedYaml bytes.Buffer
+	tmpl, err := template.ParseFiles(yamlFilePath)
+	if err != nil {
+		return fmt.Errorf("error parsing configmap template file %s: %w", yamlFilePath, err)
+	}
+
+	if err := tmpl.Execute(&processedYaml, nil); err != nil {
+		return fmt.Errorf("error executing configmap template: %w", err)
+	}
+
+	var configMap corev1.ConfigMap
+	if err := yaml.Unmarshal(processedYaml.Bytes(), &configMap); err != nil {
+		return fmt.Errorf("error unmarshalling configmap YAML: %w", err)
+	}
+
+	log.Printf("Creating cleanup ConfigMap '%s'", configMap.Name)
+	_, err = ClientSet.CoreV1().ConfigMaps(namespace).Create(context.TODO(), &configMap, metav1.CreateOptions{})
+	if err != nil {
+		return err
+	}
+
+	log.Printf("Cleanup ConfigMap '%s' created successfully", configMap.Name)
+
+	return nil
+}
+
+func CreateCleanupSecretIfDoesNotExists() error {
+	yamlFilePath := "k8s/templates/cleanup-secret.template.yaml"
+	secretName := "lab-cleanup-secrets"
+	namespace := "devsarena"
+
+	_, err := ClientSet.CoreV1().Secrets(namespace).Get(context.TODO(), secretName, metav1.GetOptions{})
+	if err == nil {
+		log.Printf("Cleanup Secret '%s' already exists, skipping.", secretName)
+		return nil
+	}
+	if !errors.IsNotFound(err) {
+		return err
+	}
+
+	var processedYaml bytes.Buffer
+	tmpl, err := template.ParseFiles(yamlFilePath)
+	if err != nil {
+		return fmt.Errorf("error parsing secret template file %s: %w", yamlFilePath, err)
+	}
+
+	if err := tmpl.Execute(&processedYaml, nil); err != nil {
+		return fmt.Errorf("error executing secret template: %w", err)
+	}
+
+	var secret corev1.Secret
+	if err := yaml.Unmarshal(processedYaml.Bytes(), &secret); err != nil {
+		return fmt.Errorf("error unmarshalling secret YAML: %w", err)
+	}
+
+	log.Printf("Creating cleanup Secret '%s'", secret.Name)
+	_, err = ClientSet.CoreV1().Secrets(namespace).Create(context.TODO(), &secret, metav1.CreateOptions{})
+	if err != nil {
+		return err
+	}
+
+	log.Printf("Cleanup Secret '%s' created successfully", secret.Name)
+
+	return nil
+}
+
+func CreateCleanupTestJobFromYamlIfDoesNotExists(params SpinUpParams) error {
+	yamlFilePath := "k8s/templates/cleanup-test-job.template.yaml"
+	jobName := "lab-cleanup-test-job"
+
+	_, err := ClientSet.BatchV1().Jobs(params.Namespace).Get(context.TODO(), jobName, metav1.GetOptions{})
+	if err == nil {
+		log.Printf("Cleanup test job '%s' already exists, skipping.", jobName)
+		return nil
+	}
+	if !errors.IsNotFound(err) {
+		return err
+	}
+
+	var processedYaml bytes.Buffer
+	tmpl, err := template.ParseFiles(yamlFilePath)
+	if err != nil {
+		return fmt.Errorf("error parsing template file %s: %w", yamlFilePath, err)
+	}
+
+	if err := tmpl.Execute(&processedYaml, params); err != nil {
+		return fmt.Errorf("error executing template: %w", err)
+	}
+
+	var job batchv1.Job
+	if err := yaml.Unmarshal(processedYaml.Bytes(), &job); err != nil {
+		return fmt.Errorf("error unmarshalling test job YAML: %w", err)
+	}
+
+	log.Printf("Creating cleanup test job '%s'", job.Name)
+	_, err = ClientSet.BatchV1().Jobs(params.Namespace).Create(context.TODO(), &job, metav1.CreateOptions{})
+	if err != nil {
+		return err
+	}
+
+	log.Printf("Cleanup test job '%s' created successfully", job.Name)
+
+	return nil
+}
+
 // TearDownPodWithLanguage removes the resources created for a lab.
 func TearDownPodWithLanguage(params SpinDownParams) error {
 	if ClientSet == nil {
@@ -306,6 +476,20 @@ func TearDownPodWithLanguage(params SpinDownParams) error {
 	deploymentName := fmt.Sprintf("%s-deployment", params.LabID)
 	serviceName := fmt.Sprintf("%s-service", params.LabID)
 	ingressName := fmt.Sprintf("%s-ingress", params.LabID)
+	jobName := fmt.Sprintf("%s-ssl-progress-job", params.LabID)
+
+	backgroundDeletion := metav1.DeletePropagationBackground
+
+	if err := ClientSet.BatchV1().Jobs(params.Namespace).Delete(context.TODO(), jobName, metav1.DeleteOptions{
+		PropagationPolicy: &backgroundDeletion,
+	}); err != nil {
+		if !errors.IsNotFound(err) {
+			log.Printf("Failed to delete SSL progress job %s: %v", jobName, err)
+			return err
+		}
+	} else {
+		log.Printf("SSL progress job %s deleted successfully", jobName)
+	}
 
 	// Delete Deployment
 	if err := ClientSet.AppsV1().Deployments(params.Namespace).Delete(context.TODO(), deploymentName, metav1.DeleteOptions{}); err != nil {

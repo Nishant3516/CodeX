@@ -142,6 +142,13 @@ func (h *ptyHandler) startPtySession() {
 			log.Printf("Error reading from WebSocket: %v", err)
 			break
 		}
+
+		// Update lab monitor queue with user interaction
+		labId := os.Getenv("LAB_ID")
+		if labId != "" {
+			UpdateLabMonitorQueue(labId)
+		}
+
 		// The message from the frontend might be JSON-encoded
 		var input map[string]string
 		if err := json.Unmarshal(msg, &input); err == nil {

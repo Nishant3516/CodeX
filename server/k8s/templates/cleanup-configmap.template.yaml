@@ -1,0 +1,19 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: 'lab-cleanup-config'
+  namespace: devsarena
+data:
+  # Inactive threshold in seconds (30 minutes = 1800 seconds)
+  INACTIVE_THRESHOLD: "1800"
+  # API endpoint for lab cleanup
+  CLEANUP_API_ENDPOINT: "https://api.devsarena.in/v0/playground/end"
+  # Cronitor monitor URL
+  CRONITOR_MONITOR_URL: "https://cronitor.link/p/10964f824dd541c99e9b7d1fa52b97de"
+  # Cronitor monitor key
+  CRONITOR_MONITOR_KEY: "xoHpkb"
+  # Schedule for the cronjob (every hour)
+  CRONJOB_SCHEDULE: "0 * * * *"
+  # Job history limits
+  SUCCESSFUL_JOBS_HISTORY: "3"
+  FAILED_JOBS_HISTORY: "3"

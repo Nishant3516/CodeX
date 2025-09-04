@@ -1,0 +1,216 @@
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: 'lab-cleanup-cronjob'
+  namespace: devsarena
+spec:
+  schedule: "0 * * * *"  # Will be overridden by environment variable in orchestrator
+  jobTemplate:
+    spec:
+      template:
+        spec:
+          containers:
+          - name: cleanup-inactive-labs
+            image: alpine:latest
+            env:
+            - name: REDIS_URL
+              valueFrom:
+                secretKeyRef:
+                  name: aws-secrets
+                  key: REDIS_URI
+            - name: CLEANUP_API_ENDPOINT
+              valueFrom:
+                secretKeyRef:
+                  name: lab-cleanup-secrets
+                  key: CLEANUP_API_ENDPOINT
+            - name: CRONITOR_MONITOR_URL
+              valueFrom:
+                secretKeyRef:
+                  name: lab-cleanup-secrets
+                  key: CRONITOR_MONITOR_URL
+            - name: CRONITOR_MONITOR_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: lab-cleanup-secrets
+                  key: CRONITOR_MONITOR_KEY
+            - name: INACTIVE_THRESHOLD
+              valueFrom:
+                configMapKeyRef:
+                  name: lab-cleanup-config
+                  key: INACTIVE_THRESHOLD
+            command:
+            - sh
+            - -c
+            - |
+              apk add --no-cache curl redis jq ca-certificates
+
+              # Test network connectivity
+              echo "$(date): Testing network connectivity..."
+              if ping -c 1 google.com >/dev/null 2>&1; then
+                echo "$(date): Network connectivity test passed"
+              else
+                echo "$(date): Network connectivity test failed"
+              fi
+
+              # Test curl installation
+              echo "$(date): Testing curl installation..."
+              if curl --version >/dev/null 2>&1; then
+                echo "$(date): Curl is properly installed"
+              else
+                echo "$(date): Curl installation failed"
+                exit 1
+              fi
+
+              MONITOR_KEY="${CRONITOR_MONITOR_KEY}"
+              MONITOR_BASE_URL="${CRONITOR_MONITOR_URL}"
+              MONITOR_URL="${MONITOR_BASE_URL}/${MONITOR_KEY}"
+              API_ENDPOINT="${CLEANUP_API_ENDPOINT}"
+              INACTIVE_THRESHOLD="${INACTIVE_THRESHOLD:-1800}"
+
+              echo "$(date): Starting cleanup of inactive labs"
+              echo "$(date): MONITOR_KEY: $MONITOR_KEY"
+              echo "$(date): MONITOR_BASE_URL: $MONITOR_BASE_URL"
+              echo "$(date): Monitor URL: $MONITOR_URL"
+              echo "$(date): Configuration:"
+              echo "$(date):   - API Endpoint: $API_ENDPOINT"
+              echo "$(date):   - Monitor URL: $MONITOR_URL"
+              echo "$(date):   - Inactive Threshold: $INACTIVE_THRESHOLD seconds"
+
+              # Send cronitor ping to indicate job started
+              echo "$(date): Sending start notification to Cronitor..."
+              START_MSG="Starting cleanup of inactive labs"
+              START_URL="$MONITOR_URL?state=run&msg=$(echo "$START_MSG" | sed 's/ /%20/g')"
+              echo "$(date): Start URL: $START_URL"
+              START_RESPONSE=$(curl -v -k -s -w "HTTPSTATUS:%{http_code}" --connect-timeout 10 --max-time 30 "$START_URL" 2>&1 || echo "curl_failed")
+              echo "$(date): Raw curl response: $START_RESPONSE"
+              if echo "$START_RESPONSE" | grep -q "HTTPSTATUS:200"; then
+                echo "$(date): Successfully sent start notification to Cronitor"
+              else
+                echo "$(date): Failed to send start notification to Cronitor (Response: $START_RESPONSE)"
+              fi
+
+              CURRENT_TIME=$(date +%s)
+              CLEANUP_COUNT=0
+
+              echo "$(date): Current time: $CURRENT_TIME"
+              echo "$(date): Inactive threshold: $INACTIVE_THRESHOLD seconds"
+
+              # Get all items from the labs_monitor queue
+              MONITOR_ITEMS=$(redis-cli -u $REDIS_URL LRANGE "labs_monitor" 0 -1)
+
+              if [ -z "$MONITOR_ITEMS" ]; then
+                echo "$(date): No labs found in monitor queue"
+                # Send cronitor ping for completion
+                echo "$(date): Sending completion notification to Cronitor..."
+                COMPLETE_MSG="No labs to cleanup"
+                COMPLETE_URL="$MONITOR_URL?state=complete&msg=$(echo "$COMPLETE_MSG" | sed 's/ /%20/g')"
+                echo "$(date): Complete URL: $COMPLETE_URL"
+                COMPLETE_RESPONSE=$(curl -v -k -s -w "HTTPSTATUS:%{http_code}" --connect-timeout 10 --max-time 30 "$COMPLETE_URL" 2>&1 || echo "curl_failed")
+                echo "$(date): Raw curl response: $COMPLETE_RESPONSE"
+                if echo "$COMPLETE_RESPONSE" | grep -q "HTTPSTATUS:200"; then
+                  echo "$(date): Successfully sent completion notification to Cronitor"
+                else
+                  echo "$(date): Failed to send completion notification to Cronitor (Response: $COMPLETE_RESPONSE)"
+                fi
+                exit 0
+              fi
+
+              echo "$MONITOR_ITEMS" | while read -r item; do
+                if [ -z "$item" ]; then
+                  continue
+                fi
+
+                LAB_ID=$(echo "$item" | jq -r '.labID // empty' 2>/dev/null || echo "")
+                LAST_UPDATED=$(echo "$item" | jq -r '.lastUpdatedAt // empty' 2>/dev/null || echo "")
+                STATUS=$(echo "$item" | jq -r '.status // empty' 2>/dev/null || echo "")
+
+                if [ -z "$LAB_ID" ] || [ -z "$LAST_UPDATED" ] || [ "$LAST_UPDATED" = "null" ]; then
+                  echo "$(date): Skipping invalid entry: $item"
+                  continue
+                fi
+
+                TIME_DIFF=$((CURRENT_TIME - LAST_UPDATED))
+
+                echo "$(date): Lab $LAB_ID - Last updated: $LAST_UPDATED, Time diff: ${TIME_DIFF}s, Status: $STATUS"
+
+                # Check if lab has been inactive for more than threshold
+                if [ $TIME_DIFF -gt $INACTIVE_THRESHOLD ]; then
+                  echo "$(date): Lab $LAB_ID has been inactive for $TIME_DIFF seconds (> $INACTIVE_THRESHOLD), spinning down"
+
+                  # Get lab language from Redis (assuming it's stored in lab_instances)
+                  LAB_DATA=$(redis-cli -u $REDIS_URL HGET "lab_instances" "$LAB_ID")
+                  LAB_LANGUAGE=$(echo "$LAB_DATA" | jq -r '.Language // "javascript"' 2>/dev/null || echo "javascript")
+
+                  # Skip if language is empty (invalid lab)
+                  if [ -z "$LAB_LANGUAGE" ] || [ "$LAB_LANGUAGE" = "null" ]; then
+                    echo "$(date): Skipping lab $LAB_ID due to missing language"
+                    continue
+                  fi
+
+                  # Call the cleanup API to spin down the lab
+                  CLEANUP_RESPONSE=$(curl -s -X DELETE "$API_ENDPOINT" \
+                    -H "Content-Type: application/json" \
+                    -d "{\"language\": \"$LAB_LANGUAGE\", \"labId\": \"$LAB_ID\"}" || echo "cleanup_failed")
+
+                  if echo "$CLEANUP_RESPONSE" | grep -q "success\|ok\|deleted\|true"; then
+                    echo "$(date): Successfully initiated cleanup for lab $LAB_ID"
+                    CLEANUP_COUNT=$((CLEANUP_COUNT + 1))
+
+                    # Remove from labs_monitor queue
+                    redis-cli -u $REDIS_URL LREM "labs_monitor" 1 "$item"
+                    echo "$(date): Removed lab $LAB_ID from monitor queue"
+
+                    # Also remove from lab_instances hash
+                    redis-cli -u $REDIS_URL HDEL "lab_instances" "$LAB_ID"
+                    echo "$(date): Removed lab $LAB_ID from lab_instances hash"
+                  else
+                    echo "$(date): Failed to cleanup lab $LAB_ID: $CLEANUP_RESPONSE"
+                    # Send cronitor ping for failure
+                    echo "$(date): Sending failure notification to Cronitor..."
+                    FAIL_MSG="Failed to cleanup lab $LAB_ID"
+                    FAIL_URL="$MONITOR_URL?state=fail&msg=$(echo "$FAIL_MSG" | sed 's/ /%20/g')"
+                    echo "$(date): Fail URL: $FAIL_URL"
+                    FAIL_RESPONSE=$(curl -v -k -s -w "HTTPSTATUS:%{http_code}" --connect-timeout 10 --max-time 30 "$FAIL_URL" 2>&1 || echo "curl_failed")
+                    echo "$(date): Raw curl response: $FAIL_RESPONSE"
+                    if echo "$FAIL_RESPONSE" | grep -q "HTTPSTATUS:200"; then
+                      echo "$(date): Successfully sent failure notification to Cronitor"
+                    else
+                      echo "$(date): Failed to send failure notification to Cronitor (Response: $FAIL_RESPONSE)"
+                    fi
+                  fi
+                else
+                  echo "$(date): Lab $LAB_ID is still active (within threshold)"
+                fi
+              done
+
+              echo "$(date): Cleanup completed. Processed $CLEANUP_COUNT inactive labs"
+
+              # Send cronitor ping for completion
+              if [ $CLEANUP_COUNT -gt 0 ]; then
+                echo "$(date): Sending completion notification to Cronitor..."
+                FINAL_MSG="Cleaned up $CLEANUP_COUNT inactive labs"
+                FINAL_URL="$MONITOR_URL?state=complete&msg=$(echo "$FINAL_MSG" | sed 's/ /%20/g')"
+                echo "$(date): Final URL: $FINAL_URL"
+                FINAL_RESPONSE=$(curl -v -k -s -w "HTTPSTATUS:%{http_code}" --connect-timeout 10 --max-time 30 "$FINAL_URL" 2>&1 || echo "curl_failed")
+                echo "$(date): Raw curl response: $FINAL_RESPONSE"
+                if echo "$FINAL_RESPONSE" | grep -q "HTTPSTATUS:200"; then
+                  echo "$(date): Successfully sent completion notification to Cronitor"
+                else
+                  echo "$(date): Failed to send completion notification to Cronitor (Response: $FINAL_RESPONSE)"
+                fi
+              else
+                echo "$(date): Sending completion notification to Cronitor..."
+                FINAL_MSG="No inactive labs found"
+                FINAL_URL="$MONITOR_URL?state=complete&msg=$(echo "$FINAL_MSG" | sed 's/ /%20/g')"
+                echo "$(date): Final URL: $FINAL_URL"
+                FINAL_RESPONSE=$(curl -v -k -s -w "HTTPSTATUS:%{http_code}" --connect-timeout 10 --max-time 30 "$FINAL_URL" 2>&1 || echo "curl_failed")
+                echo "$(date): Raw curl response: $FINAL_RESPONSE"
+                if echo "$FINAL_RESPONSE" | grep -q "HTTPSTATUS:200"; then
+                  echo "$(date): Successfully sent completion notification to Cronitor"
+                else
+                  echo "$(date): Failed to send completion notification to Cronitor (Response: $FINAL_RESPONSE)"
+                fi
+              fi
+          restartPolicy: OnFailure
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3

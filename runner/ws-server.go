@@ -91,6 +91,11 @@ func (m *WSManager) routeEvent(event Event, client *Client) error {
 		return client.SendError("Unknown event type", "Handler not found for event type: "+event.Type)
 	}
 
+	// Update lab monitor queue with user interaction
+	if LAB_ID != "" {
+		UpdateLabMonitorQueue(LAB_ID)
+	}
+
 	// Create a context for the handler
 	ctx := context.Background()
 

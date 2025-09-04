@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"log"
 	"os"
+	"time"
 
 	"github.com/redis/go-redis/v9"
 )
@@ -116,4 +117,54 @@ func UpdateLabInstanceProgress(labID string, progress LabProgressEntry) {
 	}
 
 	log.Printf("Lab instance %s progress updated", labID)
+}
+
+// UpdateLabMonitorQueue updates the updatedAt field for a lab in the lab_monitor queue
+func UpdateLabMonitorQueue(labID string) {
+	if RedisClient == nil {
+		log.Printf("Redis client not initialized, skipping lab monitor update")
+		return
+	}
+
+	currentTime := time.Now().Unix()
+
+	// Get all items from the lab_monitor queue
+	monitorItems, err := RedisClient.LRange(Context, "labs_monitor", 0, -1).Result()
+	if err != nil {
+		log.Printf("Failed to get lab monitor queue: %v", err)
+		return
+	}
+
+	// Find and update the lab entry
+	for i, item := range monitorItems {
+		var monitorEntry LabMonitoringEntry
+		if err := json.Unmarshal([]byte(item), &monitorEntry); err != nil {
+			log.Printf("Failed to unmarshal monitor entry: %v", err)
+			continue
+		}
+
+		if monitorEntry.LabID == labID {
+			// Update the updatedAt field
+			monitorEntry.LastUpdatedAt = currentTime
+			monitorEntry.Status = Active
+
+			// Marshal back to JSON
+			updatedData, err := json.Marshal(monitorEntry)
+			if err != nil {
+				log.Printf("Failed to marshal updated monitor entry: %v", err)
+				continue
+			}
+
+			// Update the list item
+			err = RedisClient.LSet(Context, "labs_monitor", int64(i), updatedData).Err()
+			if err != nil {
+				log.Printf("Failed to update lab monitor entry for %s: %v", labID, err)
+			} else {
+				log.Printf("Updated lab monitor entry for %s with timestamp %d", labID, currentTime)
+			}
+			return
+		}
+	}
+
+	log.Printf("Lab %s not found in monitor queue, skipping update", labID)
 }
