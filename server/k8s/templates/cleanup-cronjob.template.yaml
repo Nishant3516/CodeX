@@ -20,18 +20,18 @@ spec:
                   key: REDIS_URI
             - name: CLEANUP_API_ENDPOINT
               valueFrom:
-                secretKeyRef:
-                  name: lab-cleanup-secrets
+                configMapKeyRef:
+                  name: lab-cleanup-config
                   key: CLEANUP_API_ENDPOINT
             - name: CRONITOR_MONITOR_URL
               valueFrom:
-                secretKeyRef:
-                  name: lab-cleanup-secrets
+                configMapKeyRef:
+                  name: lab-cleanup-config
                   key: CRONITOR_MONITOR_URL
             - name: CRONITOR_MONITOR_KEY
               valueFrom:
-                secretKeyRef:
-                  name: lab-cleanup-secrets
+                configMapKeyRef:
+                  name: lab-cleanup-config
                   key: CRONITOR_MONITOR_KEY
             - name: INACTIVE_THRESHOLD
               valueFrom:
@@ -43,23 +43,6 @@ spec:
             - -c
             - |
               apk add --no-cache curl redis jq ca-certificates
-
-              # Test network connectivity
-              echo "$(date): Testing network connectivity..."
-              if ping -c 1 google.com >/dev/null 2>&1; then
-                echo "$(date): Network connectivity test passed"
-              else
-                echo "$(date): Network connectivity test failed"
-              fi
-
-              # Test curl installation
-              echo "$(date): Testing curl installation..."
-              if curl --version >/dev/null 2>&1; then
-                echo "$(date): Curl is properly installed"
-              else
-                echo "$(date): Curl installation failed"
-                exit 1
-              fi
 
               MONITOR_KEY="${CRONITOR_MONITOR_KEY}"
               MONITOR_BASE_URL="${CRONITOR_MONITOR_URL}"
@@ -115,73 +98,72 @@ spec:
                 exit 0
               fi
 
-              echo "$MONITOR_ITEMS" | while read -r item; do
+              # Process labs and count cleanups
+              CLEANUP_COUNT=0
+              TEMP_FILE=$(mktemp /tmp/lab_cleanup_XXXXXX 2>/dev/null || echo "/tmp/lab_cleanup_$$")
+
+              # Initialize temp file
+              : > "$TEMP_FILE" 2>/dev/null && echo "$(date): Using temp file: $TEMP_FILE" || TEMP_FILE=""
+
+              while IFS= read -r item; do
                 if [ -z "$item" ]; then
                   continue
                 fi
 
-                LAB_ID=$(echo "$item" | jq -r '.labID // empty' 2>/dev/null || echo "")
-                LAST_UPDATED=$(echo "$item" | jq -r '.lastUpdatedAt // empty' 2>/dev/null || echo "")
-                STATUS=$(echo "$item" | jq -r '.status // empty' 2>/dev/null || echo "")
+                LAB_ID=$(echo "$item" | jq -r '.labID // .LabID // empty' 2>/dev/null || echo "")
+                LAST_UPDATED=$(echo "$item" | jq -r '.LastUpdatedAt // .lastUpdatedAt // empty' 2>/dev/null || echo "")
+                STATUS=$(echo "$item" | jq -r '.status // .Status // empty' 2>/dev/null || echo "")
+
+                echo "$(date): Processing entry - LabID: '$LAB_ID', LastUpdated: '$LAST_UPDATED', Status: '$STATUS'"
 
                 if [ -z "$LAB_ID" ] || [ -z "$LAST_UPDATED" ] || [ "$LAST_UPDATED" = "null" ]; then
-                  echo "$(date): Skipping invalid entry: $item"
+                  echo "$(date): Skipping invalid entry - missing LabID, LastUpdated, or null timestamp"
                   continue
                 fi
 
                 TIME_DIFF=$((CURRENT_TIME - LAST_UPDATED))
 
-                echo "$(date): Lab $LAB_ID - Last updated: $LAST_UPDATED, Time diff: ${TIME_DIFF}s, Status: $STATUS"
-
-                # Check if lab has been inactive for more than threshold
                 if [ $TIME_DIFF -gt $INACTIVE_THRESHOLD ]; then
-                  echo "$(date): Lab $LAB_ID has been inactive for $TIME_DIFF seconds (> $INACTIVE_THRESHOLD), spinning down"
+                  echo "$(date): Lab $LAB_ID inactive for ${TIME_DIFF}s (> $INACTIVE_THRESHOLD), cleaning up"
 
-                  # Get lab language from Redis (assuming it's stored in lab_instances)
                   LAB_DATA=$(redis-cli -u $REDIS_URL HGET "lab_instances" "$LAB_ID")
                   LAB_LANGUAGE=$(echo "$LAB_DATA" | jq -r '.Language // "javascript"' 2>/dev/null || echo "javascript")
 
-                  # Skip if language is empty (invalid lab)
                   if [ -z "$LAB_LANGUAGE" ] || [ "$LAB_LANGUAGE" = "null" ]; then
-                    echo "$(date): Skipping lab $LAB_ID due to missing language"
+                    echo "$(date): Skipping $LAB_ID - missing language"
                     continue
                   fi
 
-                  # Call the cleanup API to spin down the lab
                   CLEANUP_RESPONSE=$(curl -s -X DELETE "$API_ENDPOINT" \
                     -H "Content-Type: application/json" \
-                    -d "{\"language\": \"$LAB_LANGUAGE\", \"labId\": \"$LAB_ID\"}" || echo "cleanup_failed")
+                    -d "{\"language\": \"$LAB_LANGUAGE\", \"labId\": \"$LAB_ID\"}" || echo "failed")
 
                   if echo "$CLEANUP_RESPONSE" | grep -q "success\|ok\|deleted\|true"; then
-                    echo "$(date): Successfully initiated cleanup for lab $LAB_ID"
-                    CLEANUP_COUNT=$((CLEANUP_COUNT + 1))
+                    echo "$(date): Successfully cleaned up lab $LAB_ID"
 
-                    # Remove from labs_monitor queue
-                    redis-cli -u $REDIS_URL LREM "labs_monitor" 1 "$item"
-                    echo "$(date): Removed lab $LAB_ID from monitor queue"
-
-                    # Also remove from lab_instances hash
-                    redis-cli -u $REDIS_URL HDEL "lab_instances" "$LAB_ID"
-                    echo "$(date): Removed lab $LAB_ID from lab_instances hash"
-                  else
-                    echo "$(date): Failed to cleanup lab $LAB_ID: $CLEANUP_RESPONSE"
-                    # Send cronitor ping for failure
-                    echo "$(date): Sending failure notification to Cronitor..."
-                    FAIL_MSG="Failed to cleanup lab $LAB_ID"
-                    FAIL_URL="$MONITOR_URL?state=fail&msg=$(echo "$FAIL_MSG" | sed 's/ /%20/g')"
-                    echo "$(date): Fail URL: $FAIL_URL"
-                    FAIL_RESPONSE=$(curl -v -k -s -w "HTTPSTATUS:%{http_code}" --connect-timeout 10 --max-time 30 "$FAIL_URL" 2>&1 || echo "curl_failed")
-                    echo "$(date): Raw curl response: $FAIL_RESPONSE"
-                    if echo "$FAIL_RESPONSE" | grep -q "HTTPSTATUS:200"; then
-                      echo "$(date): Successfully sent failure notification to Cronitor"
+                    # Track cleanup count
+                    if [ -n "$TEMP_FILE" ] && [ -f "$TEMP_FILE" ]; then
+                      echo "1" >> "$TEMP_FILE"
                     else
-                      echo "$(date): Failed to send failure notification to Cronitor (Response: $FAIL_RESPONSE)"
+                      CLEANUP_COUNT=$((CLEANUP_COUNT + 1))
                     fi
+
+                    # Remove from Redis
+                    redis-cli -u $REDIS_URL LREM "labs_monitor" 1 "$item" >/dev/null
+                    redis-cli -u $REDIS_URL HDEL "lab_instances" "$LAB_ID" >/dev/null
+                  else
+                    echo "$(date): Failed to cleanup lab $LAB_ID"
                   fi
                 else
-                  echo "$(date): Lab $LAB_ID is still active (within threshold)"
+                  echo "$(date): Lab $LAB_ID still active (${TIME_DIFF}s < $INACTIVE_THRESHOLD)"
                 fi
-              done
+              done < <(echo "$MONITOR_ITEMS")
+
+              # Get final count
+              if [ -n "$TEMP_FILE" ] && [ -f "$TEMP_FILE" ]; then
+                CLEANUP_COUNT=$(wc -l < "$TEMP_FILE" 2>/dev/null || echo "$CLEANUP_COUNT")
+                rm -f "$TEMP_FILE" 2>/dev/null
+              fi
 
               echo "$(date): Cleanup completed. Processed $CLEANUP_COUNT inactive labs"
 

@@ -180,8 +180,18 @@ func (s *Server) StartLabHandler(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, fmt.Sprintf("Failed to spin up pod: %v", err), http.StatusInternalServerError)
 		return
 	}
+	response := map[string]interface{}{
+		"success": true,
+		"labId":   labId,
+	}
 
+	jsonResp, err := json.Marshal(response)
+	if err != nil {
+		http.Error(w, "Internal server error", http.StatusInternalServerError)
+		return
+	}
 	w.WriteHeader(http.StatusOK)
+	_, _ = w.Write(jsonResp)
 }
 
 func (s *Server) EndLabHandler(w http.ResponseWriter, r *http.Request) {
