@@ -28,58 +28,99 @@ const TerminalComponent = ({ params }: { params: ProjectParams }) => {
     }
 
     // Determine protocol based on current page
-    let socket: WebSocket | null = null;
-    try {
-      const ptyUrl = buildPtyUrl(labId);
-      socket = new WebSocket(ptyUrl);
-    } catch (e) {
-      console.error('Terminal socket creation error', e);
-    }
+    let currentSocket: WebSocket | null = null;
+    let isReconnecting = false;
+    let reconnectionAttempts = 0;
+    const maxReconnectionAttempts = 5;
+    const reconnectionDelay = 2000; // 2 seconds
+    let messageTimeout: NodeJS.Timeout | null = null;
 
-    if (!socket) {
-      term.writeln('Failed to create terminal connection.');
-      return;
-    }
-
-    // When the connection opens, print a welcome message
-    socket.onopen = () => {
-      term.writeln('Welcome to DevsArena!');
-      term.writeln('You can now run commands in your workspace.');
-      term.writeln('');
-    };
-
-    // When a message is received from the Go backend, write it to the terminal
-    socket.onmessage = (event) => {
-      term.write(event.data);
-    };
-
-    // When the user types in the terminal, send the data to the Go backend
+    // Attach onData once
     const onData = (data: string) => {
       const message = JSON.stringify({ data });
-      if (socket && socket.readyState === WebSocket.OPEN) {
-        socket.send(message);
+      if (currentSocket && currentSocket.readyState === WebSocket.OPEN) {
+        currentSocket.send(message);
       }
     };
     term.onData(onData);
 
-    // Handle connection closing
-    socket.onclose = (event) => {
-      if (event.code !== 1000) {
-        term.writeln('');
-        term.writeln('Connection to terminal lost. Reconnecting...');
+    const createSocket = () => {
+      try {
+        const ptyUrl = buildPtyUrl(labId);
+        currentSocket = new WebSocket(ptyUrl);
+        setupSocketHandlers();
+      } catch (e) {
+        console.error('Terminal socket creation error', e);
       }
     };
 
-    // Handle errors
-    socket.onerror = (error) => {
-      term.writeln('Terminal connection error occurred.');
+    const setupSocketHandlers = () => {
+      if (!currentSocket) return;
+
+      // When the connection opens, print a welcome message
+      currentSocket.onopen = () => {
+        if (isReconnecting) {
+          term.writeln('Reconnected to terminal.');
+          isReconnecting = false;
+          reconnectionAttempts = 0;
+          if (messageTimeout) {
+            clearTimeout(messageTimeout);
+            messageTimeout = null;
+          }
+        } else {
+          term.writeln('Welcome to DevsArena!');
+          term.writeln('You can now run commands in your workspace.');
+          term.writeln('');
+        }
+      };
+
+      // When a message is received from the Go backend, write it to the terminal
+      currentSocket.onmessage = (event) => {
+        term.write(event.data);
+      };
+
+      // Handle connection closing
+      currentSocket.onclose = (event) => {
+        if (event.code !== 1000) {
+          isReconnecting = true;
+          reconnectionAttempts++;
+
+          if (reconnectionAttempts <= maxReconnectionAttempts) {
+            // Show message after a delay
+            messageTimeout = setTimeout(() => {
+              if (isReconnecting) {
+                term.writeln('');
+                term.writeln('Connection to terminal lost. Reconnecting...');
+              }
+            }, 1000); // 1 second delay
+
+            // Attempt to reconnect after delay
+            setTimeout(() => {
+              if (isReconnecting) {
+                createSocket();
+              }
+            }, reconnectionDelay);
+          } else {
+            term.writeln('');
+            term.writeln('Failed to reconnect after multiple attempts. Please refresh the page.');
+            isReconnecting = false;
+          }
+        }
+      };
+
+      // Handle errors
+      currentSocket.onerror = (error) => {
+        term.writeln('Terminal connection error occurred.');
+      };
     };
+
+    createSocket();
 
     // Clean up on component unmount
     return () => {
       try {
-        if (socket) {
-          socket.close();
+        if (currentSocket) {
+          currentSocket.close();
         }
       } catch {}
       try {
