@@ -1,5 +1,5 @@
 "use client";
-import React, { useState, useEffect, useCallback, useRef } from 'react';
+import React, { useState, useEffect, useCallback, useRef, act } from 'react';
 import { useParams } from 'next/navigation';
 import { Panel, PanelGroup, PanelResizeHandle } from 'react-resizable-panels';
 import { Loader2 } from 'lucide-react';
@@ -67,6 +67,7 @@ export default function V1ProjectPage() {
   const [saveToast, setSaveToast] = useState<string | null>(null);
   // Set when LoadingScreen reports ready; allows us to hide it even if bootstrap says not fully ready yet
   const [loadingDone, setLoadingDone] = useState(false);
+  const [loadingFile, setLoadingFile] = useState<string | null>(bootstrap.activeFile);
   
 
   const savingFiles = useRef<Set<string>>(new Set());
@@ -89,21 +90,12 @@ export default function V1ProjectPage() {
       setConsoleLogs(prev => [...prev, { type: 'warning', message: `Connection issues: ${mergedFsError || mergedPtyError}`, timestamp: new Date() }]);
     }
   }, [mergedFsConnected, mergedPtyConnected, mergedFsError, mergedPtyError]);
-
-  const effectiveFileTree = bootstrap.fileTree;
-  const effectiveFileContents = bootstrap.fileContents;
-  const effectiveLoadFileContent = bootstrap.openFile;
-  const effectiveLoadDirectory = bootstrap.loadDirectory;
-  const effectiveSaveFile = bootstrap.saveFile;
-  const effectiveCreateFile = bootstrap.createFile;
-  const effectiveDeleteFile = bootstrap.deleteFile;
-  const effectiveRenameFile = bootstrap.renameFile;
-  const effectiveIsConnected = mergedFsConnected;
-
-  // When bootstrap chooses an initial file, sync it locally
   useEffect(() => {
     if (bootstrap.activeFile && !activeFile) {
       setActiveFile(bootstrap.activeFile);
+      if (loadingFile == bootstrap.activeFile) {
+        setLoadingFile(null);
+      }
     }
   }, [bootstrap.activeFile, activeFile]);
 
@@ -112,33 +104,39 @@ export default function V1ProjectPage() {
     if (localFileContents[filePath] !== undefined) {
       return localFileContents[filePath];
     }
-    if (effectiveFileContents[filePath] !== undefined) {
-      return effectiveFileContents[filePath];
+    if (bootstrap.fileContents[filePath] !== undefined) {
+      return bootstrap.fileContents[filePath];
     }
     return '';
-  }, [localFileContents, effectiveFileContents]);
+  }, [localFileContents, bootstrap.fileContents]);
+
 
   // Handle file selection
   const handleFileSelect = useCallback(async (path: string) => {
     if (activeFile === path) return;
     
     setActiveFile(path);
+    setLoadingFile(path);
     
     try {
       // Load file content from server if not already loaded
-      if (effectiveFileContents[path] === undefined) {
+      if (bootstrap.fileContents[path] === undefined) {
         setConsoleLogs(prev => [...prev, {
           type: 'info',
           message: `Loading ${path}...`,
           timestamp: new Date()
         }]);
-        await effectiveLoadFileContent(path);
+        await bootstrap.openFile(path);
         
+        // Check if this file is still the active one
         setConsoleLogs(prev => [...prev, {
           type: 'success',
           message: `Loaded ${path}`,
           timestamp: new Date()
         }]);
+      } else {
+        // Content is already available, clear loading immediately
+        setLoadingFile(null);
       }
     } catch (error) {
       setConsoleLogs(prev => [...prev, {
@@ -146,8 +144,11 @@ export default function V1ProjectPage() {
         message: `Failed to load ${path}: ${error}`,
         timestamp: new Date()
       }]);
+    } finally {
+      // Clear loading state only if this file is still the active one
+      setLoadingFile(current => current === path ? null : current);
     }
-  }, [activeFile, effectiveFileContents, effectiveLoadFileContent]);
+  }, [activeFile, bootstrap.fileContents, bootstrap.openFile]);
 
   // Handle directory toggle
   const handleDirectoryToggle = useCallback(async (path: string) => {
@@ -165,8 +166,7 @@ export default function V1ProjectPage() {
           timestamp: new Date()
         }]);
         
-  await effectiveLoadDirectory(path);
-        
+        await bootstrap.loadDirectory(path);        
         setConsoleLogs(prev => [...prev, {
           type: 'success',
           message: `Loaded directory ${path}`,
@@ -181,7 +181,7 @@ export default function V1ProjectPage() {
       }
     }
     setExpandedDirs(newExpanded);
-  }, [expandedDirs, effectiveLoadDirectory]);
+  }, [expandedDirs, bootstrap.loadDirectory]);
 
   // Handle code changes
   const handleCodeChange = useCallback((value: string) => {
@@ -220,7 +220,7 @@ export default function V1ProjectPage() {
         timestamp: new Date()
       }]);
 
-  await effectiveSaveFile(activeFile, content);
+  await bootstrap.saveFile(activeFile, content);
 
       setConsoleLogs(prev => [...prev, {
         type: 'success',
@@ -242,7 +242,7 @@ export default function V1ProjectPage() {
     } finally {
       savingFiles.current.delete(activeFile);
     }
-  }, [activeFile, getCurrentFileContent, effectiveSaveFile]);
+  }, [activeFile, getCurrentFileContent, bootstrap.saveFile]);
 
   // Handle file creation
   const handleFileCreate = useCallback(async (path: string, isDirectory: boolean) => {
@@ -253,7 +253,7 @@ export default function V1ProjectPage() {
         timestamp: new Date()
       }]);
       
-  await effectiveCreateFile(path, isDirectory, isDirectory ? undefined : '');
+  await bootstrap.createFile(path, isDirectory, isDirectory ? undefined : '');
       
       setConsoleLogs(prev => [...prev, {
         type: 'success',
@@ -267,7 +267,7 @@ export default function V1ProjectPage() {
         timestamp: new Date()
       }]);
     }
-  }, [effectiveCreateFile]);
+  }, [bootstrap.createFile]);
 
   // Handle file deletion
   const handleFileDelete = useCallback(async (path: string) => {
@@ -278,7 +278,7 @@ export default function V1ProjectPage() {
         timestamp: new Date()
       }]);
       
-  await effectiveDeleteFile(path);
+  await bootstrap.deleteFile(path);
       
       setConsoleLogs(prev => [...prev, {
         type: 'success',
@@ -297,7 +297,7 @@ export default function V1ProjectPage() {
         timestamp: new Date()
       }]);
     }
-  }, [effectiveDeleteFile, activeFile]);
+  }, [bootstrap.deleteFile, activeFile]);
 
   // Handle file rename
   const handleFileRename = useCallback(async (oldPath: string, newPath: string) => {
@@ -308,7 +308,7 @@ export default function V1ProjectPage() {
         timestamp: new Date()
       }]);
       
-  await effectiveRenameFile(oldPath, newPath);
+  await bootstrap.renameFile(oldPath, newPath);
       
       setConsoleLogs(prev => [...prev, {
         type: 'success',
@@ -327,7 +327,7 @@ export default function V1ProjectPage() {
         timestamp: new Date()
       }]);
     }
-  }, [effectiveRenameFile, activeFile]);
+  }, [bootstrap.renameFile, activeFile]);
 
   // Keyboard shortcuts
   useEffect(() => {
@@ -372,8 +372,8 @@ export default function V1ProjectPage() {
   // Show loading screen until connections are established AND file tree is loaded
   dlog('Main page debug:', {
     isReady: mergedIsReady,
-    fileTreeKeys: Object.keys(effectiveFileTree),
-    fileTreeLength: Object.keys(effectiveFileTree).length,
+    fileTreeKeys: Object.keys(bootstrap.fileTree),
+    fileTreeLength: Object.keys(bootstrap.fileTree).length,
     fsConnected: mergedFsConnected,
     ptyConnected: mergedPtyConnected,
     bootstrapPhase: bootstrap.phase
@@ -428,13 +428,13 @@ export default function V1ProjectPage() {
       <PanelGroup direction="horizontal">
         {/* File Explorer Panel */}
         <Panel defaultSize={20} minSize={15} maxSize={30}>
-      {Object.keys(effectiveFileTree).length === 0 ? (
+      {Object.keys(bootstrap.fileTree).length === 0 ? (
             <div className="h-full w-full flex items-center justify-center text-gray-400 text-xs px-2 text-center">
   {'Still fetching project files...'}
             </div>
           ) : (
             <FileExplorer
-              fileTree={effectiveFileTree}
+              fileTree={bootstrap.fileTree}
               activeFile={activeFile}
               dirtyFiles={dirtyFiles}
               expandedDirs={expandedDirs}
@@ -459,6 +459,7 @@ export default function V1ProjectPage() {
             onCodeChange={handleCodeChange}
             onRun={handleRun}
             onSave={handleSave}
+            isLoading={loadingFile === activeFile}
           />
         </Panel>
 
