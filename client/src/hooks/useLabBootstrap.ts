@@ -102,6 +102,7 @@ export function useLabBootstrap({
   const [fileTree, setFileTree] = useState<any>({});
   const [fileContents, setFileContents] = useState<Record<string, string>>({});
   const [activeFile, setActiveFile] = useState<string | null>(null);
+  const [maxLabsReached, setMaxLabsReached] = useState(false);
   const initialFileChosen = useRef(false);
   const ptySocketRef = useRef<WebSocket | null>(null);
   const isMounted = useRef(true);
@@ -208,6 +209,10 @@ export function useLabBootstrap({
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ labId, language })
       });
+      if (res.status === 429) {
+        setMaxLabsReached(true);
+        return false;
+      }
       if (res.ok || res.status === 409) return true;
       return false;
     } catch {
@@ -547,7 +552,8 @@ export function useLabBootstrap({
     loadDirectory,
   retryFetchMeta: fetchQuestMeta,
   metaLoaded: metaLoadedRef.current,
-    apiCalls: apiCalls.current
+    apiCalls: apiCalls.current,
+    maxLabsReached
   };
 
   return publicApi;

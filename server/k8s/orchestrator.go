@@ -394,11 +394,6 @@ func CreateCleanupCronJobFromYamlIfDoesNotExists(params SpinUpParams) error {
 		return fmt.Errorf("could not create cleanup configmap: %w", err)
 	}
 
-	// Create the Secret if it doesn't exist
-	if err := CreateCleanupSecretIfDoesNotExists(); err != nil {
-		return fmt.Errorf("could not create cleanup secret: %w", err)
-	}
-
 	yamlFilePath := "k8s/templates/cleanup-cronjob.template.yaml"
 	cronJobName := "lab-cleanup-cronjob"
 
@@ -472,46 +467,6 @@ func CreateCleanupConfigMapIfDoesNotExists() error {
 	}
 
 	log.Printf("Cleanup ConfigMap '%s' created successfully", configMap.Name)
-
-	return nil
-}
-
-func CreateCleanupSecretIfDoesNotExists() error {
-	yamlFilePath := "k8s/templates/cleanup-secret.template.yaml"
-	secretName := "lab-cleanup-secrets"
-	namespace := "devsarena"
-
-	_, err := ClientSet.CoreV1().Secrets(namespace).Get(context.TODO(), secretName, metav1.GetOptions{})
-	if err == nil {
-		log.Printf("Cleanup Secret '%s' already exists, skipping.", secretName)
-		return nil
-	}
-	if !errors.IsNotFound(err) {
-		return err
-	}
-
-	var processedYaml bytes.Buffer
-	tmpl, err := template.ParseFiles(yamlFilePath)
-	if err != nil {
-		return fmt.Errorf("error parsing secret template file %s: %w", yamlFilePath, err)
-	}
-
-	if err := tmpl.Execute(&processedYaml, nil); err != nil {
-		return fmt.Errorf("error executing secret template: %w", err)
-	}
-
-	var secret corev1.Secret
-	if err := yaml.Unmarshal(processedYaml.Bytes(), &secret); err != nil {
-		return fmt.Errorf("error unmarshalling secret YAML: %w", err)
-	}
-
-	log.Printf("Creating cleanup Secret '%s'", secret.Name)
-	_, err = ClientSet.CoreV1().Secrets(namespace).Create(context.TODO(), &secret, metav1.CreateOptions{})
-	if err != nil {
-		return err
-	}
-
-	log.Printf("Cleanup Secret '%s' created successfully", secret.Name)
 
 	return nil
 }

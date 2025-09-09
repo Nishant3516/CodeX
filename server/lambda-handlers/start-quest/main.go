@@ -60,7 +60,18 @@ func handler(ctx context.Context, req events.APIGatewayProxyRequest) (events.API
 		return events.APIGatewayProxyResponse{StatusCode: 500, Body: fmt.Sprintf(`{"error":"Failed to get number of active lab instances: %s"}`, err.Error())}, nil
 	}
 	if count > ALLOWED_CONCURRENT_LABS {
-		return events.APIGatewayProxyResponse{StatusCode: 429, Body: fmt.Sprintf(`{"error":"Exceeded maximum concurrent labs: %d"}`, ALLOWED_CONCURRENT_LABS)}, nil
+		response := map[string]interface{}{
+			"error":   "Exceeded maximum concurrent labs",
+			"allowed": ALLOWED_CONCURRENT_LABS,
+			"current": count,
+		}
+		jsonResp, err := json.Marshal(response)
+		if err != nil {
+			log.Printf("start-quest: failed to marshal JSON response: %v", err)
+			return events.APIGatewayProxyResponse{StatusCode: 500, Body: fmt.Sprintf(`{"error":"Failed to marshal JSON response: %s"}`, err.Error())}, nil
+		}
+
+		return events.APIGatewayProxyResponse{StatusCode: 429, Body: string(jsonResp)}, nil
 	}
 	// Initialize k8s client from in-cluster token/env
 	if err := k8s.InitK8sInCluster(); err != nil {
@@ -78,31 +89,14 @@ func handler(ctx context.Context, req events.APIGatewayProxyRequest) (events.API
 		DirtyReadPaths: []string{},
 	}
 	utils.RedisUtilsInstance.CreateLabInstance(labInstance)
-	destinationKey := fmt.Sprintf("code/%s/%s", payload.Language, payload.LabID)
-
 	sourceKey := fmt.Sprintf("boilerplate/%s", payload.Language)
-
-	err = utils.CopyS3Folder(sourceKey, destinationKey)
-	if err != nil {
-		log.Printf("start-quest: async copy failed: %v", err)
-		// Update lab status to error
-		errorProgress := utils.LabProgressEntry{
-			Timestamp:   time.Now().Unix(),
-			Status:      utils.Error,
-			Message:     fmt.Sprintf("Failed to copy files: %v", err),
-			ServiceName: utils.S3_SERVICE,
-		}
-		utils.RedisUtilsInstance.UpdateLabInstanceProgress(payload.LabID, errorProgress)
-		return events.APIGatewayProxyResponse{StatusCode: 500, Body: fmt.Sprintf(`{"error":"Async copy failed: %s"}`, err.Error())}, nil
-	}
-	log.Printf("start-quest:  copy completed successfully for %s", payload.LabID)
 
 	params := k8s.SpinUpParams{
 		LabID:                 payload.LabID,
 		Language:              payload.Language,
 		AppName:               fmt.Sprintf("%s-%s", payload.Language, payload.LabID),
 		S3Bucket:              os.Getenv("AWS_S3_BUCKET_NAME"),
-		S3Key:                 destinationKey,
+		S3Key:                 sourceKey,
 		Namespace:             os.Getenv("K8S_NAMESPACE"),
 		ShouldCreateNamespace: false,
 	}

@@ -4,6 +4,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { Terminal, Code, Play, CheckCircle, Loader2, Sparkles, AlertTriangle, RefreshCw } from 'lucide-react';
 import { LoadingTips } from '../LoadingTips';
 import { useLabBootstrap } from '@/hooks/useLabBootstrap';
+import { MaxLabsModal } from './MaxLabsModal';
 import { dlog } from '@/utils/debug';
 
 interface LoadingScreenProps {
@@ -241,6 +242,12 @@ export function LoadingScreen({
           </motion.div>
         )}
       </div>
+
+      {/* Max Labs Modal */}
+      <MaxLabsModal
+        isOpen={bootstrap.maxLabsReached}
+        onClose={() => window.location.href = '/v1/playground'}
+      />
     </div>
   );
 }

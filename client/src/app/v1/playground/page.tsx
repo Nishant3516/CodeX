@@ -10,10 +10,11 @@ import {
   Code,
 } from "lucide-react";
 import { PLAYGROUND_OPTIONS } from "@/constants/playground";
+import { MaxLabsModal } from "@/components/editor/MaxLabsModal";
 
 export default function PlaygroundPage() {
   const [loading, setLoading] = useState<string | null>(null);
-
+  const [showMaxLabsModal, setShowMaxLabsModal] = useState(false);
   async function startLab(language: string, id: string) {
     setLoading(id);
     try {
@@ -50,6 +51,14 @@ export default function PlaygroundPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ language, labId }),
       });
+
+      if(res.status === 429) {
+
+        setLoading(null);
+        setShowMaxLabsModal(true);
+        return;
+      }
+
 
       if (!res.ok) throw new Error("Failed to start lab instance");
 
@@ -91,13 +100,6 @@ export default function PlaygroundPage() {
 
   return (
     <>
-      {/* Font import for better typography */}
-      <style jsx global>{`
-        @import url("https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;700;800&display=swap");
-        .font-poppins {
-          font-family: "Poppins", sans-serif;
-        }
-      `}</style>
       <div className="min-h-screen bg-gradient-to-br from-gray-900 via-gray-800 to-gray-900 text-white flex flex-col items-center p-4 sm:p-8 font-poppins relative overflow-hidden">
         {/* Background decoration */}
         <div className="absolute inset-0 opacity-30">
@@ -341,6 +343,15 @@ export default function PlaygroundPage() {
           </motion.footer>
         </div>
       </div>
+
+            {/* Maximum Labs Exceeded Modal */}
+      <MaxLabsModal
+        isOpen={showMaxLabsModal}
+        onClose={() => {
+          setShowMaxLabsModal(false);
+          window.location.href = '/v1/playground';
+        }}
+      />
     </>
   );
 }

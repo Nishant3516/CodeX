@@ -96,7 +96,19 @@ func (s *Server) StartLabHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if count > uint64(ALLOWED_CONCURRENT_LABS) {
-		http.Error(w, fmt.Sprintf("Exceeded maximum concurrent labs: %d", ALLOWED_CONCURRENT_LABS), http.StatusTooManyRequests)
+		response := map[string]interface{}{
+			"error":   "Exceeded maximum concurrent labs",
+			"allowed": ALLOWED_CONCURRENT_LABS,
+			"current": count,
+		}
+		jsonResp, err := json.Marshal(response)
+		if err != nil {
+			http.Error(w, "Internal server error", http.StatusInternalServerError)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusTooManyRequests)
+		_, _ = w.Write(jsonResp)
 		return
 	}
 	var req struct {
@@ -132,18 +144,18 @@ func (s *Server) StartLabHandler(w http.ResponseWriter, r *http.Request) {
 		DirtyReadPaths: []string{},
 	}
 	utils.RedisUtilsInstance.CreateLabInstance(labInstance)
-	err = utils.CopyS3Folder(sourceKey, destinationKey)
-	if err != nil {
-		http.Error(w, fmt.Sprintf("Failed to copy content to S3: %v", err), http.StatusInternalServerError)
-		return
-	}
+	// err = utils.CopyS3Folder(sourceKey, destinationKey)
+	// if err != nil {
+	// 	http.Error(w, fmt.Sprintf("Failed to copy content to S3: %v", err), http.StatusInternalServerError)
+	// 	return
+	// }
 
 	params := k8s.SpinUpParams{
 		LabID:                 labId,
 		Language:              language,
 		AppName:               fmt.Sprintf("%s-%s", language, labId),
 		S3Bucket:              os.Getenv("AWS_S3_BUCKET_NAME"),
-		S3Key:                 destinationKey,
+		S3Key:                 sourceKey,
 		Namespace:             "devsarena",
 		ShouldCreateNamespace: true,
 	}
@@ -160,15 +172,18 @@ func (s *Server) StartLabHandler(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, fmt.Sprintf("Failed to spin up pod: %v", err), http.StatusInternalServerError)
 		return
 	}
-
 	response := map[string]interface{}{
 		"success": true,
 		"labId":   labId,
-		"message": "Provisioning started",
 	}
-	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(response)
-	log.Printf("Provisioning started for LabID: %s", labId)
+
+	jsonResp, err := json.Marshal(response)
+	if err != nil {
+		http.Error(w, "Internal server error", http.StatusInternalServerError)
+		return
+	}
+	w.WriteHeader(http.StatusOK)
+	_, _ = w.Write(jsonResp)
 
 }
 

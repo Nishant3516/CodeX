@@ -11,6 +11,7 @@ import { PreviewPanel } from '@/components/editor/PreviewPanel';
 import { TerminalPanel } from '@/components/editor/TerminalPanel';
 import ProgressIndicator from '@/components/editor/ProgressIndicator';
 import { LoadingScreen } from '@/components/editor/LoadingScreen';
+import { MaxLabsModal } from '@/components/editor/MaxLabsModal';
 import { useLabBootstrap } from '@/hooks/useLabBootstrap';
 
 // Hooks
@@ -68,6 +69,7 @@ export default function V1ProjectPage() {
   // Set when LoadingScreen reports ready; allows us to hide it even if bootstrap says not fully ready yet
   const [loadingDone, setLoadingDone] = useState(false);
   const [loadingFile, setLoadingFile] = useState<string | null>(bootstrap.activeFile);
+  const [showMaxLabsModal, setShowMaxLabsModal] = useState(false);
   
 
   const savingFiles = useRef<Set<string>>(new Set());
@@ -98,6 +100,19 @@ export default function V1ProjectPage() {
       }
     }
   }, [bootstrap.activeFile, activeFile]);
+
+  // Show max labs modal when error occurs
+  useEffect(() => {
+    console.log('Bootstrap error changed:', bootstrap.error);
+    if (bootstrap.error?.code === 'max_labs_exceeded' ||
+        (bootstrap.error?.message && bootstrap.error.message.toLowerCase().includes('maximum')) ||
+        (bootstrap.error?.message && bootstrap.error.message.toLowerCase().includes('exceeded'))) {
+      console.log('Showing max labs modal');
+      setShowMaxLabsModal(true);
+    } else if (bootstrap.error) {
+      console.log('Different error detected:', bootstrap.error.code, bootstrap.error.message);
+    }
+  }, [bootstrap.error]);
 
   // Get current file content (prioritize local edits over server)
   const getCurrentFileContent = useCallback((filePath: string): string => {
@@ -492,6 +507,12 @@ export default function V1ProjectPage() {
           </PanelGroup>
         </Panel>
       </PanelGroup>
+
+      {/* Max Labs Modal */}
+      <MaxLabsModal
+        isOpen={showMaxLabsModal}
+        onClose={() => setShowMaxLabsModal(false)}
+      />
     </div>
   );
 }
