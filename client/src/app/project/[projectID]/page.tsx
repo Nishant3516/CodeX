@@ -8,10 +8,9 @@ import RunControls from "@/components/RunControls";
 import Tabs from "@/components/Tabs";
 import SplitPane from "@/components/SplitPane";
 import ConsoleOutput from "@/components/ConsoleOutput";
-import ValidationOutput from "@/components/ValidationOutput";
 import CheckpointFloatingUI from "@/components/CheckpointFloatingUI";
+import CelebrationModal from "@/components/CelebrationModal";
 import SettingsModal, { SettingsState, defaultSettings } from "@/components/SettingsModal";
-import { validateHTML, validateCSS, validateJS, generateLinkSuggestions } from "@/utils/validators";
 import { prettifyCode } from "@/utils/prettifier";
 import { TestRunner } from "@/utils/testRunner";
 import { useKeyboardShortcuts } from "@/hooks/useKeyboardShortcuts";
@@ -47,12 +46,10 @@ export default function ProjectPage({ params }: Params) {
   const [consoleLogs, setConsoleLogs] = useState<string[]>([]);
   const [consoleErrors, setConsoleErrors] = useState<string[]>([]);
   const [showConsole, setShowConsole] = useState<boolean>(false);
-  const [validationErrors, setValidationErrors] = useState<string[]>([]);
-  const [validationSuggestions, setValidationSuggestions] = useState<string[]>([]);
-  const [showValidation, setShowValidation] = useState<boolean>(false);
   const [settings, setSettings] = useState<SettingsState>(defaultSettings);
   const [showSettings, setShowSettings] = useState<boolean>(false);
   const [isIframeReady, setIsIframeReady] = useState<boolean>(false);
+  const [showCelebration, setShowCelebration] = useState<boolean>(false);
   
   // Use the project hook for dynamic data loading
   const { loading, error } = useProject(params);
@@ -86,6 +83,23 @@ export default function ProjectPage({ params }: Params) {
       initializeProject(projectID, projectData);
     })();
   }, [projectData, initializeProject, params]);
+
+  // Check for completion and show celebration
+  useEffect(() => {
+    if (!projectData || checkpointProgress.length === 0) return;
+    
+    const completedCheckpoints = checkpointProgress.filter(cp => cp.completed).length;
+    const totalCheckpoints = projectData.checkpoints.length;
+    
+    // Show celebration when all checkpoints are completed
+    if (completedCheckpoints === totalCheckpoints && totalCheckpoints > 0) {
+      // Small delay to let the user see the final checkpoint completion
+      const timer = setTimeout(() => {
+        setShowCelebration(true);
+      }, 1000);
+      return () => clearTimeout(timer);
+    }
+  }, [checkpointProgress, projectData]);
   
   const previewIframeRef = useRef<HTMLIFrameElement>(null);
   const debounceTimerRef = useRef<NodeJS.Timeout | null>(null);
@@ -136,39 +150,7 @@ export default function ProjectPage({ params }: Params) {
       updateStoredContent(activeFile, value);
       updateFileContent(activeFile, value);
     }, 300); // 300ms debounce for content changes
-    
-    // Run validation on content change only if auto-validation is enabled
-    if (settings.autoValidation) {
-      const ext = activeFile.split('.').pop()?.toLowerCase();
-      let errors: string[] = [];
-      let suggestions: string[] = [];
-      
-      switch (ext) {
-        case 'html':
-          errors = validateHTML(value);
-          suggestions = generateLinkSuggestions(activeFile, files);
-          break;
-        case 'css':
-          errors = validateCSS(value, settings.cssAutoSemicolon);
-          break;
-        case 'js':
-          errors = validateJS(value);
-          break;
-      }
-      
-      setValidationErrors(errors.filter(msg => msg.includes('❌') || msg.includes('⚠️')));
-      setValidationSuggestions([...errors.filter(msg => msg.includes('💡') || msg.includes('🎨') || msg.includes('🚀') || msg.includes('📱') || msg.includes('🌐') || msg.includes('📄') || msg.includes('♿') || msg.includes('🧹') || msg.includes('✨') || msg.includes('⚡')), ...suggestions]);
-      
-      // Auto-show validation panel if there are errors
-      if (errors.some(msg => msg.includes('❌') || msg.includes('⚠️'))) {
-        setShowValidation(true);
-      }
-    } else {
-      // Clear validation if auto-validation is disabled
-      setValidationErrors([]);
-      setValidationSuggestions([]);
-    }
-  }, [activeFile, files, settings.autoValidation, settings.cssAutoSemicolon, updateFileContent]);
+  }, [activeFile, updateFileContent]);
 
   const handleRun = useCallback(() => {
     // Clear previous logs and errors
@@ -178,29 +160,6 @@ export default function ProjectPage({ params }: Params) {
     const html = contents["index.html"] || "";
     const css = contents["styles.css"] || "";
     const js = contents["script.js"] || "";
-    
-    // Validate code and separate validation from runtime errors
-    const htmlValidation = validateHTML(html);
-    const cssValidation = validateCSS(css, settings.cssAutoSemicolon);
-    const jsValidation = validateJS(js);
-    
-    // Only show actual syntax errors in console, not suggestions
-    const consoleCSSErrors = cssValidation.filter(msg => msg.includes('❌') || msg.includes('⚠️'));
-    const consoleJSErrors = jsValidation.filter(msg => msg.includes('❌') || msg.includes('⚠️'));
-    const consoleHTMLErrors = htmlValidation.filter(msg => msg.includes('❌') || msg.includes('⚠️'));
-    
-    const runtimeErrors = [...consoleHTMLErrors, ...consoleCSSErrors, ...consoleJSErrors];
-    setConsoleErrors(runtimeErrors);
-    
-    // Update validation panel with all validation messages
-    const allValidationErrors = [...htmlValidation, ...cssValidation, ...jsValidation];
-    setValidationErrors(allValidationErrors.filter(msg => msg.includes('❌') || msg.includes('⚠️')));
-    setValidationSuggestions(allValidationErrors.filter(msg => msg.includes('💡') || msg.includes('🎨') || msg.includes('🚀') || msg.includes('📱') || msg.includes('🌐') || msg.includes('📄') || msg.includes('♿') || msg.includes('🧹') || msg.includes('✨') || msg.includes('⚡')));
-    
-    // Auto-show validation panel if there are validation issues
-    if (allValidationErrors.length > 0) {
-      setShowValidation(true);
-    }
 
     // Create enhanced HTML with console capture and custom alert/prompt
     const enhancedJS = `
@@ -349,11 +308,6 @@ export default function ProjectPage({ params }: Params) {
   const handleClearConsole = () => {
     setConsoleLogs([]);
     setConsoleErrors([]);
-  };
-
-  const handleClearValidation = () => {
-    setValidationErrors([]);
-    setValidationSuggestions([]);
   };
 
   const handleSaveSettings = (newSettings: SettingsState) => {
@@ -602,7 +556,6 @@ export default function ProjectPage({ params }: Params) {
     onPrettify: handlePrettify,
     onSubmit: handleSubmit,
     onToggleConsole: () => setShowConsole(!showConsole),
-    onToggleValidation: () => setShowValidation(!showValidation),
   });
 
   // Listen for console messages from iframe
@@ -733,13 +686,6 @@ export default function ProjectPage({ params }: Params) {
                   allowDefaultContent={false}
                 />
               </div>
-              <ValidationOutput
-                errors={validationErrors}
-                suggestions={validationSuggestions}
-                isVisible={showValidation}
-                onToggle={() => setShowValidation(!showValidation)}
-                onClear={handleClearValidation}
-              />
               <RunControls 
                 onRun={handleRunTests} 
                 onSubmit={handleSubmit}
@@ -769,6 +715,14 @@ export default function ProjectPage({ params }: Params) {
             onClose={() => setShowSettings(false)}
             settings={settings}
             onSave={handleSaveSettings}
+          />
+
+          {/* Celebration Modal */}
+          <CelebrationModal
+            isOpen={showCelebration}
+            onClose={() => setShowCelebration(false)}
+            projectTitle={projectData.title}
+            totalCheckpoints={projectData.checkpoints.length}
           />
         </>
       )}
