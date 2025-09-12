@@ -327,3 +327,94 @@ func (s *service) generateSlug(title string) string {
 	}
 	return result.String()
 }
+
+// DeleteQuest removes a quest and all its related entities from the database
+func (s *service) DeleteQuest(slug string) error {
+	// Start transaction
+	tx := s.db.Begin()
+	defer func() {
+		if r := recover(); r != nil {
+			tx.Rollback()
+		}
+	}()
+
+	// Find the quest by slug
+	var quest Quest
+	if err := tx.Where("slug = ?", slug).First(&quest).Error; err != nil {
+		tx.Rollback()
+		if err == gorm.ErrRecordNotFound {
+			return fmt.Errorf("quest with slug '%s' not found", slug)
+		}
+		return fmt.Errorf("failed to find quest: %v", err)
+	}
+
+	// Delete associated testcases (they reference quest_id)
+	if err := tx.Where("quest_id = ?", quest.ID).Delete(&Testcase{}).Error; err != nil {
+		tx.Rollback()
+		return fmt.Errorf("failed to delete testcases: %v", err)
+	}
+
+	// Delete checkpoints and their associations
+	var checkpoints []Checkpoint
+	if err := tx.Where("quest_id = ?", quest.ID).Find(&checkpoints).Error; err != nil {
+		tx.Rollback()
+		return fmt.Errorf("failed to find checkpoints: %v", err)
+	}
+
+	for _, checkpoint := range checkpoints {
+		// Delete checkpoint associations
+		if err := tx.Model(&checkpoint).Association("Topics").Clear(); err != nil {
+			tx.Rollback()
+			return fmt.Errorf("failed to clear checkpoint topics: %v", err)
+		}
+		if err := tx.Model(&checkpoint).Association("Hints").Clear(); err != nil {
+			tx.Rollback()
+			return fmt.Errorf("failed to clear checkpoint hints: %v", err)
+		}
+		if err := tx.Model(&checkpoint).Association("Resources").Clear(); err != nil {
+			tx.Rollback()
+			return fmt.Errorf("failed to clear checkpoint resources: %v", err)
+		}
+		if err := tx.Model(&checkpoint).Association("Submissions").Clear(); err != nil {
+			tx.Rollback()
+			return fmt.Errorf("failed to clear checkpoint submissions: %v", err)
+		}
+		if err := tx.Model(&checkpoint).Association("Testcases").Clear(); err != nil {
+			tx.Rollback()
+			return fmt.Errorf("failed to clear checkpoint testcases: %v", err)
+		}
+
+		// Delete the checkpoint
+		if err := tx.Delete(&checkpoint).Error; err != nil {
+			tx.Rollback()
+			return fmt.Errorf("failed to delete checkpoint: %v", err)
+		}
+	}
+
+	// Clear quest associations
+	if err := tx.Model(&quest).Association("TechStack").Clear(); err != nil {
+		tx.Rollback()
+		return fmt.Errorf("failed to clear quest technologies: %v", err)
+	}
+	if err := tx.Model(&quest).Association("Topics").Clear(); err != nil {
+		tx.Rollback()
+		return fmt.Errorf("failed to clear quest topics: %v", err)
+	}
+	if err := tx.Model(&quest).Association("FinalTestCases").Clear(); err != nil {
+		tx.Rollback()
+		return fmt.Errorf("failed to clear quest final testcases: %v", err)
+	}
+
+	// Delete the quest
+	if err := tx.Delete(&quest).Error; err != nil {
+		tx.Rollback()
+		return fmt.Errorf("failed to delete quest: %v", err)
+	}
+
+	// Commit transaction
+	if err := tx.Commit().Error; err != nil {
+		return fmt.Errorf("failed to commit transaction: %v", err)
+	}
+
+	return nil
+}

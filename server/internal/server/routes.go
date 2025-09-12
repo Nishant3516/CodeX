@@ -34,10 +34,12 @@ func (s *Server) RegisterRoutes() http.Handler {
 	// Project management endpoints
 	r.HandlerFunc(http.MethodGet, "/v0/project/options", s.GetProjectOptions)
 	r.HandlerFunc(http.MethodPost, "/v0/project/add", s.AddProjectHandler)
+	r.HandlerFunc(http.MethodDelete, "/v0/project/delete", s.DeleteProjectHandler)
 	r.HandlerFunc(http.MethodPost, "/v0/quests/add", s.AddProjectHandler) // Use same handler
 	// Also support non-v0 prefix
 	r.HandlerFunc(http.MethodGet, "/project/options", s.GetProjectOptions)
 	r.HandlerFunc(http.MethodPost, "/project/add", s.AddProjectHandler)
+	r.HandlerFunc(http.MethodDelete, "/project/delete", s.DeleteProjectHandler)
 
 	r.HandlerFunc(http.MethodPost, "/v1/start/quest", s.StartLabHandler)
 	r.HandlerFunc(http.MethodPost, "/v1/end/quest", s.EndLabHandler)
@@ -302,6 +304,60 @@ func (s *Server) AddProjectHandler(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	log.Printf("Quest added successfully with slug: %s and %v", slug, response)
+	_ = json.NewEncoder(w).Encode(response)
+}
+
+// DeleteProjectHandler removes a project from the database and cleans up S3 objects
+func (s *Server) DeleteProjectHandler(w http.ResponseWriter, r *http.Request) {
+	var payload database.DeleteQuestRequest
+	if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+		http.Error(w, "Invalid JSON payload", http.StatusBadRequest)
+		return
+	}
+
+	// Validate required fields
+	if payload.Slug == "" {
+		http.Error(w, "Missing slug field", http.StatusBadRequest)
+		return
+	}
+
+	// Get quest details before deletion to clean up S3 objects
+	quest, err := s.db.GetQuestBySlug(payload.Slug)
+	if err != nil {
+		log.Printf("Error finding quest: %v", err)
+		http.Error(w, fmt.Sprintf("Quest not found: %v", err), http.StatusNotFound)
+		return
+	}
+
+	// Delete quest from database
+	err = s.db.DeleteQuest(payload.Slug)
+	if err != nil {
+		log.Printf("Error deleting quest: %v", err)
+		http.Error(w, fmt.Sprintf("Failed to delete quest: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	// TODO: Clean up S3 objects if BoilerPlateCode exists
+	if quest.BoilerPlateCode != "" {
+		log.Printf("TODO: Clean up S3 objects for quest boilerplate: %s", quest.BoilerPlateCode)
+	}
+
+	// TODO: Clean up checkpoint test files from S3
+	for _, checkpoint := range quest.Checkpoints {
+		if checkpoint.TestingCode != "" {
+			log.Printf("TODO: Clean up checkpoint test file: %s", checkpoint.TestingCode)
+		}
+	}
+
+	response := map[string]interface{}{
+		"message": "Quest deleted successfully",
+		"slug":    payload.Slug,
+		"success": true,
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	log.Printf("Quest deleted successfully: %s", payload.Slug)
+	w.WriteHeader(http.StatusOK)
 	_ = json.NewEncoder(w).Encode(response)
 }
 

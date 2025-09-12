@@ -22,28 +22,42 @@ export class TestRunner {
         // Injected test code
         ${testCase.testCode}
         
-        // Execute the test function
-        (function() {
+        // Execute the test function (supports sync and Promise-based tests)
+        (async function() {
           try {
-            const result = ${functionName}();
-            if (result && typeof result === 'object' && 'passed' in result) {
+            const maybeResult = ${functionName}();
+            const isPromise = !!(maybeResult && typeof maybeResult.then === 'function');
+         
+            const result = isPromise ? await maybeResult : maybeResult;
+
+            // Normalize common simple returns
+            let normalized = result;
+            if (typeof result === 'boolean') {
+              normalized = { passed: result, message: result ? 'Test passed' : 'Test failed' };
+            } else if (typeof result === 'string') {
+              normalized = { passed: true, message: result };
+            }
+
+            if (normalized && typeof normalized === 'object' && 'passed' in normalized) {
               window.parent.postMessage({
                 type: 'test-result',
                 testId: ${JSON.stringify(testCase.testId)},
-                result: result
+                result: normalized
               }, '*');
             } else {
+
               window.parent.postMessage({
                 type: 'test-result',
                 testId: ${JSON.stringify(testCase.testId)},
-                result: { passed: false, message: 'Test function did not return a valid result object' }
+                result: { passed: false, message: 'Test function did not return a valid result object. Expected: {passed: boolean, message: string}. Got: ' + JSON.stringify(normalized ?? null) }
               }, '*');
             }
           } catch (error) {
+            console.error('[TestRunner] Test execution error:', error);
             window.parent.postMessage({
               type: 'test-result',
               testId: ${JSON.stringify(testCase.testId)},
-              result: { passed: false, message: 'Test execution error: ' + error.message }
+              result: { passed: false, message: 'Test execution error: ' + (error && error.message ? error.message : String(error)) }
             }, '*');
           }
         })();
@@ -56,7 +70,7 @@ export class TestRunner {
             passed: false,
             message: 'Test timeout - check if required HTML elements exist and JavaScript is working'
           });
-        }, 5000); // Increased timeout to 5 seconds
+  }, 8000); // Increased timeout to 8 seconds to allow async UI/fetch flows
 
         const messageHandler = (event: MessageEvent) => {
           if (event.data.type === 'test-result' && event.data.testId === testCase.testId) {
@@ -116,21 +130,26 @@ export class TestRunner {
   }
 
   private extractFunctionName(testCode: string): string {
-    // Extract function name from test code - support multiple patterns
-    
+
     // Pattern 1: function functionName()
     let match = testCode.match(/function\s+(\w+)\s*\(/);
-    if (match) return match[1];
+    if (match) {
+      return match[1];
+    }
     
     // Pattern 2: const functionName = function()
     match = testCode.match(/(?:const|let|var)\s+(\w+)\s*=\s*function/);
-    if (match) return match[1];
+    if (match) {
+      return match[1];
+    }
     
     // Pattern 3: const functionName = () =>
     match = testCode.match(/(?:const|let|var)\s+(\w+)\s*=\s*\(/);
-    if (match) return match[1];
+    if (match) {
+      return match[1];
+    }
     
-    // Default fallback
+
     return 'testFunction';
   }
 

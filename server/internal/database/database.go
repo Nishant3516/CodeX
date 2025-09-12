@@ -31,6 +31,7 @@ type Service interface {
 
 	// Quest management
 	AddQuest(req AddQuestRequest) (string, error)
+	DeleteQuest(slug string) error
 }
 
 // service implements the Service interface using GORM
