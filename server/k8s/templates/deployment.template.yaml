@@ -15,23 +15,11 @@ spec:
     metadata:
       labels:
         app: '{{.LabID}}'
-      annotations:
-        container.apparmor.security.beta.kubernetes.io/app-container: runtime/default
     spec:
-      runtimeClassName: gvisor  
       volumes:
         - name: workspace-volume
           emptyDir:
             sizeLimit: 2Gi
-      securityContext:
-        appArmorProfile:
-          type: RuntimeDefault
-        runAsUser: 1000
-        runAsGroup: 1000
-        fsGroup: 1000
-        fsGroupChangePolicy: "OnRootMismatch"
-        seccompProfile:
-          type: RuntimeDefault
       initContainers:
         - name: copy-r2-content
           image: amazon/aws-cli:latest
