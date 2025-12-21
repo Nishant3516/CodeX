@@ -9,6 +9,7 @@ import FileExplorer from '@/components/editor/FileExplorer';
 import { CodeEditor } from '@/components/editor/CodeEditor';
 import { PreviewPanel } from '@/components/editor/PreviewPanel';
 import { TerminalPanel } from '@/components/editor/TerminalPanel';
+import { TerminalHandle } from '@/components/editor/TerminalTabs';
 import ProgressIndicator from '@/components/editor/ProgressIndicator';
 import { LoadingScreen } from '@/components/editor/LoadingScreen';
 import { MaxLabsModal } from '@/components/editor/MaxLabsModal';
@@ -76,6 +77,7 @@ export default function V1ProjectPage() {
   
 
   const savingFiles = useRef<Set<string>>(new Set());
+  const terminalRef = useRef<TerminalHandle | null>(null);
 
   const bootstrapHasFiles = Object.keys(bootstrap.fileTree).length > 0;
   const mergedIsReady = bootstrap.fsReady && bootstrapHasFiles;
@@ -363,23 +365,50 @@ export default function V1ProjectPage() {
   }, [handleSave]);
 
   // Handle run
+  const lastRunCommandRef = useRef<string | null>(null);
   const handleRun = useCallback(() => {
-    setIsRunning(true);
-    setConsoleLogs(prev => [...prev, {
-      type: 'info',
-      message: 'Running project...',
-      timestamp: new Date()
-    }]);
-    
-    setTimeout(() => {
-      setIsRunning(false);
+    // Prefer explicit start command from playground option
+    const fallback = 'npm run dev';
+    const startCommand = currentPlaygroundOption?.startCommands?.[0]
+      || (language === 'node' ? 'node index.js' : fallback);
+
+    if (!terminalRef.current) {
       setConsoleLogs(prev => [...prev, {
-        type: 'success',
-        message: 'Project executed successfully!',
+        type: 'error',
+        message: '❌ Terminal not available yet. Please wait for connection...',
         timestamp: new Date()
       }]);
-    }, 2000);
-  }, []);
+      return;
+    }
+
+    // Avoid spamming duplicate run if already running same command
+    if (isRunning && lastRunCommandRef.current === startCommand) {
+      setConsoleLogs(prev => [...prev, {
+        type: 'warning',
+        message: `⚠ Already running: ${startCommand}`,
+        timestamp: new Date()
+      }]);
+      return;
+    }
+
+    lastRunCommandRef.current = startCommand;
+    setConsoleLogs(prev => [...prev, {
+      type: 'info',
+      message: `🚀 Executing: ${startCommand}`,
+      timestamp: new Date()
+    }]);
+
+    try {
+      terminalRef.current.executeCommand(startCommand);
+      setIsRunning(true);
+    } catch (e) {
+      setConsoleLogs(prev => [...prev, {
+        type: 'error',
+        message: `Failed to run command: ${startCommand}`,
+        timestamp: new Date()
+      }]);
+    }
+  }, [currentPlaygroundOption?.startCommands, language, isRunning]);
 
   const handleClearConsole = useCallback(() => {
     setConsoleLogs([]);

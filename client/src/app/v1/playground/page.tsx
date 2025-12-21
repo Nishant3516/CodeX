@@ -11,6 +11,7 @@ import {
 } from "lucide-react";
 import { PLAYGROUND_OPTIONS } from "@/constants/playground";
 import { MaxLabsModal } from "@/components/editor/MaxLabsModal";
+import { generateRandomLabId } from "@/utils/labIdGenerator";
 
 export default function PlaygroundPage() {
   const [loading, setLoading] = useState<string | null>(null);
@@ -18,34 +19,7 @@ export default function PlaygroundPage() {
   async function startLab(language: string, id: string) {
     setLoading(id);
     try {
-    const words = [
-      "ram",
-      "vibhishan",
-      "laxman",
-      "hanuman",
-      "krishna",
-      "arjuna",
-      "bhima",
-      "yudhishthira",
-      "draupadi",
-      "sita",
-      "ravana",
-      "bharata",
-      "shatrughna",
-      "kumbhakarna",
-      "valmiki",
-      "vyasa",
-      "drona",
-      "karna",
-      "pandavas",
-      "kouravas",
-    ];
-    const numWords = Math.floor(Math.random() * 3) + 2; // 2 to 4 words
-    const selectedWords = [];
-    for (let i = 0; i < numWords; i++) {
-      selectedWords.push(words[Math.floor(Math.random() * words.length)]);
-    }
-    const labId = selectedWords.join("-");
+    const labId = generateRandomLabId();
       const res = await fetch("/api/project/start", {
         method: "POST",
         headers: { "Content-Type": "application/json" },

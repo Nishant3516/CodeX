@@ -79,8 +79,8 @@ export default function ProjectPage({ params }: Params) {
   useEffect(() => {
     if (!projectData) return;
     (async () => {
-      const { projectID } = await params;
-      initializeProject(projectID, projectData);
+	  const { projectID } = await params;
+	  initializeProject(projectID, projectData);
     })();
   }, [projectData, initializeProject, params]);
 
@@ -116,7 +116,7 @@ export default function ProjectPage({ params }: Params) {
   const updateStoredContent = async (activeFile: string, content: string) => {
     const storedProgress = localStorage.getItem('projectProgress');
     const parsedProgress = storedProgress ? JSON.parse(storedProgress) : [];
-    const projectId = (await params).projectID;
+    const { projectID:projectId } = await params;
     let progress: StoredProgress = parsedProgress.find(async (p: StoredProgress) => p.projectId === projectId) ||   {
       files: {},
       projectId: projectId,
@@ -291,7 +291,7 @@ export default function ProjectPage({ params }: Params) {
 
   const handleSubmit = async () => {
     // Save progress to localStorage
-    const { projectID } = await params;
+	const { projectID } = await params;
     saveProgress(projectID);
     setConsoleLogs(prev => [...prev, '💾 Progress saved successfully']);
     console.log("Project progress saved", contents);
@@ -689,6 +689,7 @@ export default function ProjectPage({ params }: Params) {
               <RunControls 
                 onRun={handleRunTests} 
                 onSubmit={handleSubmit}
+                onTest={()=>{}}
                 onPrettify={handlePrettify}
                 progress={checkpointProgress}
                 onSettings={() => setShowSettings(true)}

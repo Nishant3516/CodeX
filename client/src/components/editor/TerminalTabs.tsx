@@ -1,11 +1,18 @@
 "use client";
-import React, { useState, useCallback } from 'react';
+import React, { useState, useCallback, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Terminal, Plus, X } from 'lucide-react';
 import dynamic from 'next/dynamic';
 import { ProjectParams } from '@/constants/FS_MessageTypes';
 
 const XTerminal = dynamic(() => import("./Terminal"), { ssr: false });
+
+export interface TerminalHandle {
+  sendCommand: (command: string) => void;
+  executeCommand: (command: string) => void;
+  focus: () => void;
+  forceFit: () => void;
+}
 
 interface TerminalTab {
   id: string;
@@ -15,13 +22,22 @@ interface TerminalTab {
 
 interface TerminalTabsProps {
   params: ProjectParams;
+  onTerminalReady?: (terminalRef: React.RefObject<TerminalHandle | null>) => void;
 }
 
-export function TerminalTabs({ params }: TerminalTabsProps) {
+export function TerminalTabs({ params, onTerminalReady }: TerminalTabsProps) {
   const [tabs, setTabs] = useState<TerminalTab[]>([
     { id: '1', name: 'Terminal', isActive: true }
   ]);
   const [nextTabId, setNextTabId] = useState(2);
+  const terminalRef = useRef<TerminalHandle>(null);
+
+  // Notify parent when terminal is ready
+  React.useEffect(() => {
+    if (onTerminalReady) {
+      onTerminalReady(terminalRef);
+    }
+  }, [onTerminalReady]);
 
   const activeTab = tabs.find(tab => tab.isActive);
 
@@ -126,9 +142,10 @@ export function TerminalTabs({ params }: TerminalTabsProps) {
               className="absolute inset-0"
             >
               <XTerminal 
-                key={`xterm-${activeTab.id}`}
+                ref={terminalRef}
                 params={params} 
-                terminalId={activeTab.id} 
+                terminalId="main"
+                isVisible={true}
               />
             </motion.div>
           )}

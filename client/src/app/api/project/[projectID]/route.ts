@@ -5,7 +5,7 @@ export async function GET(
   { params }: { params: Promise<{ projectID: string }> }
 ) {
   try {
-    const { projectID } = await params;
+	const { projectID } = await params;
     const apiUrl = process.env.BACKEND_API_URL;
     const finalUrl = `${apiUrl}/v0/quests/${projectID}`;
     

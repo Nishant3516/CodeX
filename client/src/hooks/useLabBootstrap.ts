@@ -103,6 +103,12 @@ export function useLabBootstrap({
   const [fileContents, setFileContents] = useState<Record<string, string>>({});
   const [activeFile, setActiveFile] = useState<string | null>(null);
   const [maxLabsReached, setMaxLabsReached] = useState(false);
+  const [currentCheckpoint, setCurrentCheckpoint] = useState<number>(0);
+  const [isRunningTests, setIsRunningTests] = useState(false);
+  const [testResults, setTestResults] = useState<Record<string, any>>({});
+  const [testWsConnection, setTestWsConnection] = useState<WebSocket | null>(null);
+  const [testError, setTestError] = useState<string | null>(null);
+  const [currentTestingCheckpoint, setCurrentTestingCheckpoint] = useState<string | null>(null);
   const initialFileChosen = useRef(false);
   const ptySocketRef = useRef<WebSocket | null>(null);
   const isMounted = useRef(true);
@@ -358,16 +364,37 @@ export function useLabBootstrap({
     if (ptyReady || !ptyUrl || ptySocketRef.current) return;
     try {
       const ws = new WebSocket(ptyUrl);
-      ptySocketRef.current = ws;
+      ptySocketRef.current = ws;  
       ws.onopen = () => {
         if (!isMounted.current) return;
         setPtyReady(true);
         setPhase('full-ready');
+        setError(prev => (prev?.code === 'pty_connect_failed' ? null : prev));
       };
+      
+      ws.onmessage = (event) => {
+        try {
+          const message = JSON.parse(event.data);
+          handlePtyMessage(message);
+        } catch (error) {
+          console.log('PTY output:', event.data);
+        }
+      };
+      
       ws.onclose = () => {
         if (!isMounted.current) return;
         if (requirePtyForReady && fsReady) {
           setPhase('pty-connecting');
+        }
+        ptySocketRef.current = null;
+        setPtyReady(false);
+      };
+      
+      ws.onerror = (error) => {
+        console.error('PTY WebSocket error:', error);
+        if (requirePtyForReady) {
+          setError({ code: 'pty_connect_failed', message: 'Failed to connect PTY' });
+          setPhase('error');
         }
       };
     } catch (e: any) {
@@ -377,6 +404,140 @@ export function useLabBootstrap({
       }
     }
   }, [ptyUrl, ptyReady, requirePtyForReady, fsReady]);
+
+  const handlePtyMessage = useCallback((message: any) => {
+    console.log('PTY message received:', message);
+    
+    const testPromise = ptySocketRef.current ? (ptySocketRef.current as any).testPromise : null;
+    
+    switch (message.type) {
+      case 'test_started':
+        console.log('Test started:', message.data);
+        break;
+        
+      case 'test_completed':
+        setIsRunningTests(false);
+        const result = message.data;
+        if (result && result.checkpointId) {
+          updateTestResults(result.checkpointId, result);
+        }
+        console.log('Test completed:', result);
+        
+        if (testPromise && result?.checkpointId === testPromise.checkpointId) {
+          clearTimeout(testPromise.timeout);
+          testPromise.resolve();
+          delete (ptySocketRef.current as any).testPromise;
+        }
+        break;
+        
+      case 'test_error':
+        setIsRunningTests(false);
+        setError({ code: 'test_execution_failed', message: message.data?.message || 'Test execution failed' });
+        console.error('Test error:', message.data);
+        
+        if (testPromise) {
+          clearTimeout(testPromise.timeout);
+          testPromise.reject(new Error(message.data?.message || 'Test execution failed'));
+          delete (ptySocketRef.current as any).testPromise;
+        }
+        break;
+        
+      case 'heartbeat_response':
+        // Handle heartbeat response if needed
+        break;
+        
+      default:
+        // Handle other PTY messages (terminal output, etc.)
+        break;
+    }
+  }, []);
+
+  // Test execution functionality using PTY connection
+  const runCheckpointTest = useCallback(async (checkpointId: string, language: string): Promise<void> => {
+    if (isRunningTests || !ptySocketRef.current || ptySocketRef.current.readyState !== WebSocket.OPEN) {
+      throw new Error('PTY connection not ready or test already running');
+    }
+    
+    setIsRunningTests(true);
+    
+    return new Promise((resolve, reject) => {
+      const timeout = setTimeout(() => {
+        setIsRunningTests(false);
+        reject(new Error('Test execution timeout'));
+      }, 60000); // 60 second timeout
+      
+      // Store the promise handlers to be called from the message handler
+      const testPromiseRef = { resolve, reject, timeout, checkpointId };
+      (ptySocketRef.current as any).testPromise = testPromiseRef;
+      
+      try {
+        const testRequest = {
+          type: 'test',
+          data: JSON.stringify({
+            type: 'checkpoint',
+            checkpointId: checkpointId,
+            language: language
+          })
+        };
+        
+        ptySocketRef.current!.send(JSON.stringify(testRequest));
+        console.log('Test request sent:', testRequest);
+      } catch (error) {
+        clearTimeout(timeout);
+        setIsRunningTests(false);
+        delete (ptySocketRef.current as any).testPromise;
+        reject(error);
+      }
+    });
+  }, [isRunningTests]);
+
+  const updateTestResults = useCallback((checkpointId: string, results: any) => {
+    setTestResults(prev => {
+      const updated = { ...prev, [checkpointId]: results };
+      
+      // Check if current checkpoint test passed and advance if needed
+      const checkpointNum = parseInt(checkpointId.replace('checkpoint_', ''));
+      if (results.passed && checkpointNum === currentCheckpoint + 1) {
+        setCurrentCheckpoint(checkpointNum);
+      }
+      
+      return updated;
+    });
+  }, [currentCheckpoint]);
+
+  const loadTestResults = useCallback(async () => {
+    try {
+      const response = await fetch(`/api/v1/test-results/${labId}`);
+      if (response.ok) {
+        const data = await response.json();
+        const results = data.results || {};
+        setTestResults(results);
+        
+        // Calculate current checkpoint based on passed tests
+        let maxPassedCheckpoint = 0;
+        Object.entries(results).forEach(([checkpointId, result]: [string, any]) => {
+          if (result.passed) {
+            const checkpointNum = parseInt(checkpointId.replace('checkpoint_', ''));
+            maxPassedCheckpoint = Math.max(maxPassedCheckpoint, checkpointNum);
+          }
+        });
+        setCurrentCheckpoint(maxPassedCheckpoint);
+        
+        return results;
+      }
+      return {};
+    } catch (error) {
+      console.error('Failed to fetch test results:', error);
+      return {};
+    }
+  }, [labId]);
+
+  // Load test results when the component mounts and FS is ready
+  useEffect(() => {
+    if (fsReady && labId) {
+      loadTestResults();
+    }
+  }, [fsReady, labId, loadTestResults]);
 
   // File operations (minimal subset)
   const openFile = useCallback(async (path: string): Promise<string> => {
@@ -550,10 +711,17 @@ export function useLabBootstrap({
     deleteFile,
     renameFile,
     loadDirectory,
-  retryFetchMeta: fetchQuestMeta,
-  metaLoaded: metaLoadedRef.current,
+    retryFetchMeta: fetchQuestMeta,
+    metaLoaded: metaLoadedRef.current,
     apiCalls: apiCalls.current,
-    maxLabsReached
+    maxLabsReached,
+    // Test execution methods
+    runCheckpointTest,
+    loadTestResults,
+    currentCheckpoint,
+    isRunningTests,
+    testResults,
+    setCurrentCheckpoint
   };
 
   return publicApi;
