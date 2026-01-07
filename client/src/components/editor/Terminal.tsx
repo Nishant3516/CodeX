@@ -8,10 +8,6 @@ import { buildPtyUrl, sendPtyKillUserProcesses } from '@/lib/pty';
 import { dlog } from '@/utils/debug';
 
 export interface TerminalHandle {
-  /** Immediately writes a command and newline (no typing animation) */
-  sendCommand: (command: string) => void;
-  /** Types the command character by character then hits enter */
-  executeCommand: (command: string) => void;
   /** Focus terminal */
   focus: () => void;
   /** Force a fit recalculation */
@@ -191,51 +187,11 @@ const TerminalComponent = forwardRef<TerminalHandle, { params: ProjectParams; te
     let heartbeatInterval: NodeJS.Timeout | null = null;
     let currentCommand = ''; // Store the current command being typed
 
-    const sendDataToServer = (data: string) => {
-      const message = JSON.stringify({
-        type: 'input',
-        data: data
-      });
-      if (currentSocket && currentSocket.readyState === WebSocket.OPEN) {
-        currentSocket.send(message);
-      }
-    };
 
-    //! TODO : COME UP WITH A BETTER APPROACH
-    const isBlockedCommand = (command: string) => {
-      const trimmedCommand = command.trim();
-      const blockedCommands = [
-        'env', 'printenv', 'export', 'set', 'declare', 'unset', 'readonly', 'exit', 'kill', 'shutdown'
-      ];
-
-      // Check exact matches
-      if (blockedCommands.includes(trimmedCommand)) {
-        return true;
-      }
-
-      // Check commands that start with blocked prefixes
-      for (const blocked of blockedCommands) {
-        if (trimmedCommand.startsWith(blocked + ' ')) {
-          return true;
-        }
-      }
-
-      return false;
-    };
     
     const onData = (data: string) => {
       dlog("DATA ENTERED", data)
       if (data == "\r" || data == "\n") {
-        if (isBlockedCommand(currentCommand)) {
-          dlog('Command blocked:', currentCommand);
-    
-          term.write('\r\x1b[K');
-          term.writeln('\x1b[31m🤡   Nice Try Diddy \x1b[0m');
-          term.reset()
-
-          currentCommand = ''; 
-          return; 
-        }
         
         if (currentCommand.trim() === 'clear') {
           term.reset();
@@ -479,48 +435,6 @@ const TerminalComponent = forwardRef<TerminalHandle, { params: ProjectParams; te
 
   // Expose terminal commands through ref
   useImperativeHandle(ref, () => ({
-    sendCommand: (command: string) => {
-      if (!command) return;
-      const socket = socketRef.current;
-      if (terminalInstanceRef.current) {
-        terminalInstanceRef.current.write(command + '\r\n');
-      }
-      if (socket && socket.readyState === WebSocket.OPEN) {
-        try {
-          socket.send(JSON.stringify({ type: 'input', data: command + '\r' }));
-        } catch {}
-      }
-    },
-    executeCommand: (command: string) => {
-      if (!command) return;
-      const socket = socketRef.current;
-      if (!terminalInstanceRef.current || !socket || socket.readyState !== WebSocket.OPEN) return;
-      
-      // Focus the terminal first
-      try {
-        (terminalInstanceRef.current as any)?.focus?.();
-      } catch {}
-      
-      let index = 0;
-      const typeNext = () => {
-        if (!terminalInstanceRef.current || !socket || socket.readyState !== WebSocket.OPEN) return;
-        if (index < command.length) {
-          const ch = command[index];
-          terminalInstanceRef.current.write(ch);
-          try { socket.send(JSON.stringify({ type: 'input', data: ch })); } catch {}
-          index++;
-          setTimeout(typeNext, 8);
-        } else {
-          setTimeout(() => {
-            if (terminalInstanceRef.current) {
-              terminalInstanceRef.current.write('\r\n');
-            }
-            try { socket.send(JSON.stringify({ type: 'input', data: '\r' })); } catch {}
-          }, 40);
-        }
-      };
-      typeNext();
-    },
     focus: () => {
       try {
         // xterm focuses the textarea via focus method

@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"log"
 	"os"
 	"time"
@@ -20,6 +21,14 @@ type LabProgressEntry struct {
 	Status      LabStatus
 	Message     string
 	ServiceName LabLogServices
+}
+
+type LabTestResult struct {
+	CheckpointID string `json:"checkpointId"`
+	Passed       bool   `json:"passed"`
+	Output       string `json:"output"`
+	Timestamp    string `json:"timestamp"`
+	Duration     int64  `json:"duration,omitempty"`
 }
 
 type LabStatus string
@@ -43,13 +52,14 @@ const (
 )
 
 type LabInstanceEntry struct {
-	LabID          string
-	CreatedAt      int64
-	Language       string
-	DirtyReadPaths []string
-	Status         LabStatus
-	LastUpdatedAt  int64
-	ProgressLogs   []LabProgressEntry
+	LabID          string             `json:"labId"`
+	CreatedAt      int64              `json:"createdAt"`
+	Language       string             `json:"language"`
+	DirtyReadPaths []string           `json:"dirtyReadPaths"`
+	Status         LabStatus          `json:"status"`
+	LastUpdatedAt  int64              `json:"lastUpdatedAt"`
+	ProgressLogs   []LabProgressEntry `json:"progressLogs"`
+	Tests          []LabTestResult    `json:"tests"`
 }
 
 type LabMonitoringEntry struct {
@@ -167,4 +177,74 @@ func UpdateLabMonitorQueue(labID string) {
 	}
 
 	log.Printf("Lab %s not found in monitor queue, skipping update", labID)
+}
+
+// StoreInRedis stores a key-value pair in Redis
+func StoreInRedis(key, value string) error {
+	if RedisClient == nil {
+		return fmt.Errorf("redis client not initialized")
+	}
+
+	return RedisClient.Set(Context, key, value, 0).Err()
+}
+
+// StoreTestResultInLab stores a test result in the lab instance
+func StoreTestResultInLab(labID string, testResult LabTestResult) error {
+	if RedisClient == nil {
+		return fmt.Errorf("redis client not initialized")
+	}
+
+	// Get existing instance
+	data, err := RedisClient.HGet(Context, "lab_instances", labID).Result()
+	if err != nil {
+		log.Printf("Failed to fetch lab instance %s: %v", labID, err)
+		return err
+	}
+
+	var instance LabInstanceEntry
+	err = json.Unmarshal([]byte(data), &instance)
+	if err != nil {
+		log.Printf("Failed to unmarshal lab instance: %v", err)
+		return err
+	}
+
+	// Initialize tests array if nil
+	if instance.Tests == nil {
+		instance.Tests = []LabTestResult{}
+	}
+
+	// Check if test result already exists for this checkpoint
+	found := false
+	for i, existingTest := range instance.Tests {
+		if existingTest.CheckpointID == testResult.CheckpointID {
+			// Update existing test result
+			instance.Tests[i] = testResult
+			found = true
+			break
+		}
+	}
+
+	// If not found, append new test result
+	if !found {
+		instance.Tests = append(instance.Tests, testResult)
+	}
+
+	// Update last updated timestamp
+	instance.LastUpdatedAt = time.Now().Unix()
+
+	// Save updated instance
+	updatedData, err := json.Marshal(instance)
+	if err != nil {
+		log.Printf("Failed to marshal lab instance: %v", err)
+		return err
+	}
+
+	err = RedisClient.HSet(Context, "lab_instances", labID, updatedData).Err()
+	if err != nil {
+		log.Printf("Failed to update lab instance %s: %v", labID, err)
+		return err
+	}
+
+	log.Printf("Test result stored for lab %s, checkpoint %s", labID, testResult.CheckpointID)
+	return nil
 }

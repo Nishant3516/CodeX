@@ -144,6 +144,18 @@ export function useLabBootstrap({
         const data = await resp.json();
         setStatus(data.status);
         setProgressLogs(data.progressLogs || []);
+        
+        // Load test results and active checkpoint from Redis
+        if (data.testResults) {
+          setTestResults(data.testResults);
+        }
+        if (data.activeCheckpoint) {
+          const checkpointNum = parseInt(data.activeCheckpoint.replace('checkpoint_', ''));
+          if (!isNaN(checkpointNum)) {
+            setCurrentCheckpoint(checkpointNum);
+          }
+        }
+        
         if (data.status === 'active') {
           if (!firstActiveSeenAt.current) firstActiveSeenAt.current = Date.now();
           const fsActive = data.progressLogs?.some((l: any) => l.ServiceName === 'file_system' && l.Status === 'active');
@@ -405,6 +417,37 @@ export function useLabBootstrap({
     }
   }, [ptyUrl, ptyReady, requirePtyForReady, fsReady]);
 
+    const updateTestResults = useCallback(async (checkpointId: string, results: any) => {
+    setTestResults(prev => {
+      const updated = { ...prev, [checkpointId]: results };
+      
+      // Check if current checkpoint test passed and advance if needed
+      const checkpointNum = parseInt(checkpointId);
+      if (results.passed && checkpointNum === currentCheckpoint + 1) {
+        setCurrentCheckpoint(checkpointNum);
+      }
+      
+      return updated;
+    });
+    
+    // Save to Redis via API
+    try {
+      await fetch('/api/project/test-results', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          labId,
+          checkpointId,
+          testResult: results
+        })
+      });
+      dlog(`Test results saved to Redis for checkpoint ${checkpointId}`);
+    } catch (error) {
+      console.error('Failed to save test results to Redis:', error);
+    }
+  }, [currentCheckpoint, labId]);
+
+
   const handlePtyMessage = useCallback((message: any) => {
     console.log('PTY message received:', message);
     
@@ -413,17 +456,37 @@ export function useLabBootstrap({
     switch (message.type) {
       case 'test_started':
         console.log('Test started:', message.data);
+        setCurrentTestingCheckpoint(message.data?.checkpointId || null);
         break;
         
       case 'test_completed':
         setIsRunningTests(false);
+        setCurrentTestingCheckpoint(null);
+        
         const result = message.data;
-        if (result && result.checkpointId) {
-          updateTestResults(result.checkpointId, result);
-        }
         console.log('Test completed:', result);
         
-        if (testPromise && result?.checkpointId === testPromise.checkpointId) {
+
+        if (result && result.results && Array.isArray(result.results)) {
+          result.results.forEach((checkpointResult: any) => {
+            const checkpointId = `${checkpointResult.checkpoint}`;
+            const passed = checkpointResult.status === 'PASSED';
+            
+            const transformedResult = {
+              passed,
+              status: checkpointResult.status,
+              DurationMs: checkpointResult.durationMs,
+              Error: checkpointResult.error || null,
+              output: passed ? `Checkpoint ${checkpointResult.checkpoint} passed successfully!` : undefined,
+              error: checkpointResult.error?.message || undefined
+            };
+            
+            updateTestResults(checkpointId, transformedResult);
+          });
+        }
+        
+        // Resolve the test promise
+        if (testPromise) {
           clearTimeout(testPromise.timeout);
           testPromise.resolve();
           delete (ptySocketRef.current as any).testPromise;
@@ -432,6 +495,7 @@ export function useLabBootstrap({
         
       case 'test_error':
         setIsRunningTests(false);
+        setCurrentTestingCheckpoint(null);
         setError({ code: 'test_execution_failed', message: message.data?.message || 'Test execution failed' });
         console.error('Test error:', message.data);
         
@@ -450,7 +514,7 @@ export function useLabBootstrap({
         // Handle other PTY messages (terminal output, etc.)
         break;
     }
-  }, []);
+  }, [updateTestResults]);
 
   // Test execution functionality using PTY connection
   const runCheckpointTest = useCallback(async (checkpointId: string, language: string): Promise<void> => {
@@ -491,19 +555,6 @@ export function useLabBootstrap({
     });
   }, [isRunningTests]);
 
-  const updateTestResults = useCallback((checkpointId: string, results: any) => {
-    setTestResults(prev => {
-      const updated = { ...prev, [checkpointId]: results };
-      
-      // Check if current checkpoint test passed and advance if needed
-      const checkpointNum = parseInt(checkpointId.replace('checkpoint_', ''));
-      if (results.passed && checkpointNum === currentCheckpoint + 1) {
-        setCurrentCheckpoint(checkpointNum);
-      }
-      
-      return updated;
-    });
-  }, [currentCheckpoint]);
 
   const loadTestResults = useCallback(async () => {
     try {
@@ -692,6 +743,34 @@ export function useLabBootstrap({
     return capped;
   })();
 
+  // PTY Socket utility functions
+  const sendPtyKillUserProcesses = useCallback(() => {
+    if (!ptySocketRef.current || ptySocketRef.current.readyState !== WebSocket.OPEN) {
+      console.warn('PTY socket not connected');
+      return;
+    }
+    try {
+      ptySocketRef.current.send(JSON.stringify({ type: 'kill_user_processes' }));
+      dlog('Kill user processes command sent');
+    } catch (err) {
+      console.error('Failed to send kill command:', err);
+    }
+  }, []);
+
+  const sendPtyRunCommand = useCallback((initCommands: string[], runCommand: string) => {
+    if (!ptySocketRef.current || ptySocketRef.current.readyState !== WebSocket.OPEN) {
+      console.error('PTY socket not connected');
+      return;
+    }
+    try {
+      const payload = JSON.stringify({ initCommands, runCommand });
+      ptySocketRef.current.send(JSON.stringify({ type: 'run', data: payload }));
+      dlog('Run command sent:', { initCommands, runCommand });
+    } catch (err) {
+      console.error('Failed to send run command:', err);
+    }
+  }, []);
+
   const publicApi = {
     phase,
     percent,
@@ -715,12 +794,16 @@ export function useLabBootstrap({
     metaLoaded: metaLoadedRef.current,
     apiCalls: apiCalls.current,
     maxLabsReached,
+    // PTY socket utilities
+    sendPtyKillUserProcesses,
+    sendPtyRunCommand,
     // Test execution methods
     runCheckpointTest,
     loadTestResults,
     currentCheckpoint,
     isRunningTests,
     testResults,
+    currentTestingCheckpoint,
     setCurrentCheckpoint
   };
 

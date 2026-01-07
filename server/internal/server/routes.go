@@ -6,12 +6,14 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"strings"
 	"time"
 
 	"lms_v0/internal/database"
 	"lms_v0/k8s"
 	"lms_v0/utils"
 
+	"github.com/google/uuid"
 	"github.com/julienschmidt/httprouter"
 )
 
@@ -31,6 +33,13 @@ func (s *Server) RegisterRoutes() http.Handler {
 	r.HandlerFunc(http.MethodGet, "/v0/quests", s.GetAllQuests)
 	r.HandlerFunc(http.MethodGet, "/v0/quests/:questSlug", s.GetQuestsHandler)
 
+	// Experimental projects endpoints
+	r.HandlerFunc(http.MethodGet, "/v1/experimental/projects", s.GetExperimentalProjectsLanguages)
+	r.HandlerFunc(http.MethodGet, "/v1/experimental/projects/:language", s.GetExperimentalProjectsByLanguage)
+	r.HandlerFunc(http.MethodGet, "/v1/experimental/quest/:questSlug", s.GetExperimentalQuestMetadata)
+	r.HandlerFunc(http.MethodGet, "/v1/experimental/quest/:questSlug/checkpoints", s.GetQuestCheckpoints)
+	r.HandlerFunc(http.MethodGet, "/v1/test-results/:labId", s.GetTestResults)
+
 	// Project management endpoints
 	r.HandlerFunc(http.MethodGet, "/v0/project/options", s.GetProjectOptions)
 	r.HandlerFunc(http.MethodPost, "/v0/project/add", s.AddProjectHandler)
@@ -41,7 +50,8 @@ func (s *Server) RegisterRoutes() http.Handler {
 	r.HandlerFunc(http.MethodPost, "/project/add", s.AddProjectHandler)
 	r.HandlerFunc(http.MethodDelete, "/project/delete", s.DeleteProjectHandler)
 
-	r.HandlerFunc(http.MethodPost, "/v1/start/quest", s.StartLabHandler)
+	r.HandlerFunc(http.MethodPost, "/v1/start/playground", s.StartLabHandler)
+	r.HandlerFunc(http.MethodPost, "/v1/start/quest", s.StartQuestHandler)
 	r.HandlerFunc(http.MethodPost, "/v1/end/quest", s.EndLabHandler)
 	r.HandlerFunc(http.MethodDelete, "/v1/delete/quest", s.DeleteLabHandler)
 
@@ -189,11 +199,175 @@ func (s *Server) StartLabHandler(w http.ResponseWriter, r *http.Request) {
 
 }
 
+// StartQuestRequest represents the request payload for starting a quest
+type StartQuestRequest struct {
+	Language    string `json:"language"`
+	ProjectSlug string `json:"projectSlug"`
+	LabID       string `json:"labId"`
+}
+
+// StartQuestResponse represents the response payload for starting a quest
+type StartQuestResponse struct {
+	Success bool   `json:"success"`
+	LabID   string `json:"labId"`
+	Message string `json:"message,omitempty"`
+	Error   string `json:"error,omitempty"`
+}
+
+func (s *Server) StartQuestHandler(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+
+	// Parse request
+	var req StartQuestRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		response := StartQuestResponse{
+			Success: false,
+			Error:   "Invalid JSON payload",
+		}
+		w.WriteHeader(http.StatusBadRequest)
+		_ = json.NewEncoder(w).Encode(response)
+		return
+	}
+
+	// Validate required fields
+	if req.Language == "" {
+		response := StartQuestResponse{
+			Success: false,
+			Error:   "Missing language parameter",
+		}
+		w.WriteHeader(http.StatusBadRequest)
+		_ = json.NewEncoder(w).Encode(response)
+		return
+	}
+
+	if req.ProjectSlug == "" {
+		response := StartQuestResponse{
+			Success: false,
+			Error:   "Missing projectSlug parameter",
+		}
+		w.WriteHeader(http.StatusBadRequest)
+		_ = json.NewEncoder(w).Encode(response)
+		return
+	}
+
+	// Generate LabID if not provided
+	if req.LabID == "" {
+		req.LabID = uuid.New().String()
+	}
+
+	// Check concurrent lab limits
+	utils.RedisUtilsInstance.CreateLabProgressQueueIfNotExists()
+	utils.RedisUtilsInstance.CreateLabMonitoringQueueIfNotExists()
+	count, err := utils.RedisUtilsInstance.GetNumberOfActiveLabInstances()
+	if err != nil {
+		response := StartQuestResponse{
+			Success: false,
+			Error:   fmt.Sprintf("Failed to get number of active lab instances: %v", err),
+		}
+		w.WriteHeader(http.StatusInternalServerError)
+		_ = json.NewEncoder(w).Encode(response)
+		return
+	}
+
+	if count > uint64(ALLOWED_CONCURRENT_LABS) {
+		response := StartQuestResponse{
+			Success: false,
+			Error:   "Exceeded maximum concurrent labs",
+		}
+		w.WriteHeader(http.StatusTooManyRequests)
+		_ = json.NewEncoder(w).Encode(response)
+		return
+	}
+
+	// Get quest details from database
+	quest, err := s.db.GetQuestBySlug(req.ProjectSlug)
+	if err != nil {
+		response := StartQuestResponse{
+			Success: false,
+			Error:   fmt.Sprintf("Quest not found: %v", err),
+		}
+		w.WriteHeader(http.StatusNotFound)
+		_ = json.NewEncoder(w).Encode(response)
+		return
+	}
+
+	// Initialize K8s client
+	if err := k8s.InitK8sClient(); err != nil {
+		log.Printf("Failed to initialize kubernetes client: %v", err)
+		response := StartQuestResponse{
+			Success: false,
+			Error:   fmt.Sprintf("Failed to initialize kubernetes client: %v", err),
+		}
+		w.WriteHeader(http.StatusInternalServerError)
+		_ = json.NewEncoder(w).Encode(response)
+		return
+	}
+
+	// Prepare quest parameters
+	questParams := k8s.SpinUpQuestParams{
+		LabID:                 req.LabID,
+		Language:              req.Language,
+		ProjectSlug:           req.ProjectSlug,
+		S3Bucket:              os.Getenv("AWS_S3_BUCKET_NAME"),
+		BoilerplateKey:        quest.BoilerPlateCode, // URL from database
+		TestFilesKey:          "",                    // Will be set automatically to devsarena/projects/{projectSlug}/tests/
+		Namespace:             "devsarena",
+		ShouldCreateNamespace: true,
+	}
+
+	// Create lab instance in Redis
+	labInstance := utils.LabInstanceEntry{
+		Language:       req.Language,
+		LabID:          req.LabID,
+		CreatedAt:      time.Now().Unix(),
+		Status:         utils.Created,
+		LastUpdatedAt:  time.Now().Unix(),
+		ProgressLogs:   []utils.LabProgressEntry{},
+		DirtyReadPaths: []string{},
+	}
+	utils.RedisUtilsInstance.CreateLabInstance(labInstance)
+
+	log.Printf("Starting quest pod for LabID: %s, Project: %s, Language: %s", req.LabID, req.ProjectSlug, req.Language)
+
+	// Spin up quest pod - test files will be copied from devsarena/projects/{projectSlug}/tests/
+	err = k8s.SpinUpQuestPod(questParams)
+	if err != nil {
+		log.Printf("Failed to spin up quest pod: %v", err)
+		response := StartQuestResponse{
+			Success: false,
+			Error:   fmt.Sprintf("Failed to spin up quest pod: %v", err),
+		}
+		w.WriteHeader(http.StatusInternalServerError)
+		_ = json.NewEncoder(w).Encode(response)
+		return
+	}
+
+	// Success response
+	response := StartQuestResponse{
+		Success: true,
+		LabID:   req.LabID,
+		Message: "Quest environment started successfully",
+	}
+
+	log.Printf("Quest pod started successfully for LabID: %s", req.LabID)
+	w.WriteHeader(http.StatusOK)
+	_ = json.NewEncoder(w).Encode(response)
+
+}
+
 func (s *Server) EndLabHandler(w http.ResponseWriter, r *http.Request) {
-	language := r.URL.Query().Get("language")
-	labId := r.URL.Query().Get("labId")
+	var req struct {
+		Language string `json:"language"`
+		LabID    string `json:"labId"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Invalid JSON payload", http.StatusBadRequest)
+		return
+	}
+	language := req.Language
+	labId := req.LabID
 	if language == "" || labId == "" {
-		http.Error(w, "Missing language or labId query parameter", http.StatusBadRequest)
+		http.Error(w, "Missing language or labId in request body", http.StatusBadRequest)
 		return
 	}
 
@@ -409,4 +583,166 @@ func (s *Server) DeleteLabHandler(w http.ResponseWriter, r *http.Request) {
 	if err := json.NewEncoder(w).Encode(response); err != nil {
 		log.Printf("Error encoding delete response: %v", err)
 	}
+}
+
+// GetExperimentalProjectsLanguages returns all available programming languages/technologies
+func (s *Server) GetExperimentalProjectsLanguages(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+
+	languages := s.db.GetAllTechnologies()
+
+	response := map[string]interface{}{
+		"success":   true,
+		"languages": languages,
+	}
+
+	w.WriteHeader(http.StatusOK)
+	if err := json.NewEncoder(w).Encode(response); err != nil {
+		log.Printf("Error encoding languages response: %v", err)
+		http.Error(w, "Internal server error", http.StatusInternalServerError)
+	}
+}
+
+// GetExperimentalProjectsByLanguage returns all projects for a specific language
+func (s *Server) GetExperimentalProjectsByLanguage(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+
+	// Extract language from URL path
+	pathParts := strings.Split(strings.Trim(r.URL.Path, "/"), "/")
+	if len(pathParts) < 4 {
+		http.Error(w, "Invalid path", http.StatusBadRequest)
+		return
+	}
+	language := pathParts[3] // /v1/experimental/projects/{language}
+
+	if language == "" {
+		http.Error(w, "Language parameter is required", http.StatusBadRequest)
+		return
+	}
+
+	language = strings.ToLower(language)
+	log.Printf("Fetching projects for language: %s", language)
+	projects, err := s.db.GetQuestsByLanguage(language)
+	if err != nil {
+		log.Printf("Error getting projects for language %s: %v", language, err)
+		http.Error(w, "Failed to get projects", http.StatusInternalServerError)
+		return
+	}
+
+	response := map[string]interface{}{
+		"success":  true,
+		"language": language,
+		"projects": projects,
+	}
+
+	w.WriteHeader(http.StatusOK)
+	if err := json.NewEncoder(w).Encode(response); err != nil {
+		log.Printf("Error encoding projects response: %v", err)
+		http.Error(w, "Internal server error", http.StatusInternalServerError)
+	}
+}
+
+// GetExperimentalQuestMetadata returns detailed quest metadata for the experimental IDE
+func (s *Server) GetExperimentalQuestMetadata(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+
+	// Extract quest slug from URL path
+	pathParts := strings.Split(strings.Trim(r.URL.Path, "/"), "/")
+	if len(pathParts) < 4 {
+		http.Error(w, "Invalid path", http.StatusBadRequest)
+		return
+	}
+	questSlug := pathParts[3] // /v1/experimental/quest/{questSlug}
+
+	if questSlug == "" {
+		http.Error(w, "Quest slug parameter is required", http.StatusBadRequest)
+		return
+	}
+
+	quest, err := s.db.GetQuestBySlug(questSlug)
+	if err != nil {
+		log.Printf("Error getting quest metadata for slug %s: %v", questSlug, err)
+		http.Error(w, "Quest not found", http.StatusNotFound)
+		return
+	}
+
+	// Format response for experimental IDE
+	response := map[string]interface{}{
+		"success":     true,
+		"quest":       quest,
+		"projectSlug": questSlug,
+		"metadata": map[string]interface{}{
+			"name":         quest.Name,
+			"description":  quest.Description,
+			"difficulty":   quest.Difficulty,
+			"category":     quest.Category,
+			"techStack":    quest.TechStack,
+			"topics":       quest.Topics,
+			"checkpoints":  quest.Checkpoints,
+			"requirements": quest.Requirements,
+		},
+	}
+
+	w.WriteHeader(http.StatusOK)
+	if err := json.NewEncoder(w).Encode(response); err != nil {
+		log.Printf("Error encoding quest metadata response: %v", err)
+		http.Error(w, "Internal server error", http.StatusInternalServerError)
+	}
+}
+
+// GetQuestCheckpoints returns detailed checkpoint information
+func (s *Server) GetQuestCheckpoints(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+
+	pathParts := strings.Split(strings.Trim(r.URL.Path, "/"), "/")
+	if len(pathParts) < 5 {
+		http.Error(w, "Invalid path", http.StatusBadRequest)
+		return
+	}
+	questSlug := pathParts[3]
+
+	quest, err := s.db.GetQuestBySlug(questSlug)
+	if err != nil {
+		http.Error(w, "Quest not found", http.StatusNotFound)
+		return
+	}
+
+	checkpoints := make([]map[string]interface{}, len(quest.Checkpoints))
+	for i, checkpoint := range quest.Checkpoints {
+		checkpoints[i] = map[string]interface{}{
+			"id":           fmt.Sprintf("%d", i+1),
+			"title":        checkpoint.Title,
+			"description":  checkpoint.Description,
+			"requirements": checkpoint.Requirements,
+			"status":       "pending",
+		}
+	}
+
+	response := map[string]interface{}{
+		"success":     true,
+		"checkpoints": checkpoints,
+		"total":       len(quest.Checkpoints),
+	}
+
+	json.NewEncoder(w).Encode(response)
+}
+
+// GetTestResults returns test results for a lab
+func (s *Server) GetTestResults(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+
+	pathParts := strings.Split(strings.Trim(r.URL.Path, "/"), "/")
+	if len(pathParts) < 3 {
+		http.Error(w, "Invalid path", http.StatusBadRequest)
+		return
+	}
+	labID := pathParts[2]
+
+	response := map[string]interface{}{
+		"success": true,
+		"labId":   labID,
+		"results": map[string]interface{}{},
+	}
+
+	json.NewEncoder(w).Encode(response)
 }

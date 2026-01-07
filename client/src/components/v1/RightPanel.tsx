@@ -198,23 +198,83 @@ const CheckpointComponent: React.FC<CheckpointComponentProps> = ({
             </div>
           )}
           {!hideTestDetails && rawTestResult && (
-            <div>
+            <div className="space-y-4">
               <h5 className="text-lg font-bold text-gray-900 dark:text-gray-100 mb-4 flex items-center">
                 <svg className="w-5 h-5 mr-2 text-green-500" fill="currentColor" viewBox="0 0 20 20">
                   <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
                 </svg>
                 Test Results
               </h5>
+              
+              {/* Status Banner */}
               <div className={`p-4 rounded-xl border-l-4 ${
                 status === 'passed' ? 'bg-green-50 dark:bg-green-900/20 border-green-400' :
                 status === 'failed' ? 'bg-red-50 dark:bg-red-900/20 border-red-400' :
                 'bg-gray-50 dark:bg-gray-800/50 border-gray-400'
               }`}>
-                {rawTestResult.message && (
-                  <p className="text-gray-700 dark:text-gray-300 mb-2">{rawTestResult.message}</p>
+                <div className="flex items-center justify-between mb-2">
+                  <span className="font-bold text-gray-900 dark:text-gray-100">
+                    {status === 'passed' ? '✓ All Tests Passed' : '✗ Tests Failed'}
+                  </span>
+                  {rawTestResult.DurationMs && (
+                    <span className="text-sm text-gray-600 dark:text-gray-400">
+                      {rawTestResult.DurationMs}ms
+                    </span>
+                  )}
+                </div>
+                
+                {/* Success output */}
+                {rawTestResult.passed && rawTestResult.output && (
+                  <p className="text-gray-700 dark:text-gray-300">{rawTestResult.output}</p>
                 )}
-                {rawTestResult.error && (
-                  <pre className="text-red-600 dark:text-red-400 text-sm bg-red-50 dark:bg-red-900/30 p-3 rounded overflow-x-auto">
+                
+                {/* Error Details */}
+                {!rawTestResult.passed && rawTestResult.Error && (
+                  <div className="space-y-3 mt-3">
+                    {rawTestResult.Error.Scenario && (
+                      <div>
+                        <span className="text-xs font-semibold text-gray-600 dark:text-gray-400 uppercase tracking-wide">Test Scenario</span>
+                        <p className="text-gray-900 dark:text-gray-100 font-medium mt-1">{rawTestResult.Error.Scenario}</p>
+                      </div>
+                    )}
+                    
+                    {rawTestResult.Error.Message && (
+                      <div className="bg-red-100 dark:bg-red-900/40 p-3 rounded-lg">
+                        <span className="text-xs font-semibold text-red-800 dark:text-red-300 uppercase tracking-wide">Error</span>
+                        <p className="text-red-700 dark:text-red-200 mt-1">{rawTestResult.Error.Message}</p>
+                      </div>
+                    )}
+                    
+                    {rawTestResult.Error.Expected && rawTestResult.Error.Received && (
+                      <div className="grid grid-cols-2 gap-3">
+                        <div className="bg-green-50 dark:bg-green-900/20 p-3 rounded-lg">
+                          <span className="text-xs font-semibold text-green-800 dark:text-green-300 uppercase tracking-wide">Expected</span>
+                          <pre className="text-sm text-green-700 dark:text-green-200 mt-1 whitespace-pre-wrap break-words">{rawTestResult.Error.Expected}</pre>
+                        </div>
+                        <div className="bg-red-50 dark:bg-red-900/30 p-3 rounded-lg">
+                          <span className="text-xs font-semibold text-red-800 dark:text-red-300 uppercase tracking-wide">Received</span>
+                          <pre className="text-sm text-red-700 dark:text-red-200 mt-1 whitespace-pre-wrap break-words">{rawTestResult.Error.Received}</pre>
+                        </div>
+                      </div>
+                    )}
+                    
+                    {rawTestResult.Error.Hint && (
+                      <div className="bg-blue-50 dark:bg-blue-900/20 p-3 rounded-lg">
+                        <span className="text-xs font-semibold text-blue-800 dark:text-blue-300 uppercase tracking-wide flex items-center">
+                          <svg className="w-4 h-4 mr-1" fill="currentColor" viewBox="0 0 20 20">
+                            <path fillRule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clipRule="evenodd"/>
+                          </svg>
+                          Hint
+                        </span>
+                        <p className="text-blue-700 dark:text-blue-200 mt-1">{rawTestResult.Error.Hint}</p>
+                      </div>
+                    )}
+                  </div>
+                )}
+                
+                {/* Fallback error display for old format */}
+                {!rawTestResult.passed && !rawTestResult.Error && rawTestResult.error && (
+                  <pre className="text-red-600 dark:text-red-400 text-sm bg-red-50 dark:bg-red-900/30 p-3 rounded overflow-x-auto mt-3">
                     {rawTestResult.error}
                   </pre>
                 )}
@@ -672,7 +732,7 @@ const TabContent = {
                 />
               ))}
             </div>
-          ) : (
+          ) : !props.isRunningTests && Object.keys(props.testResults || {}).length === 0 ? (
             <div className="text-center py-16">
               <div className="w-24 h-24 mx-auto mb-6 bg-gradient-to-br from-gray-100 to-gray-200 dark:from-gray-800 dark:to-gray-700 rounded-2xl flex items-center justify-center shadow-lg">
                 <ClipboardDocumentCheckIcon className="w-12 h-12 text-gray-400" />
@@ -691,7 +751,7 @@ const TabContent = {
                 <span>Tests will validate your code against each checkpoint's requirements</span>
               </div>
             </div>
-          )}
+          ) : null}
         </div>
       </div>
     )

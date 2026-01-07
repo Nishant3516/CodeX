@@ -20,6 +20,7 @@ type Service interface {
 	Close() error
 	GetAllQuests() ([]QuestMeta, error)
 	GetQuestBySlug(slug string) (*Quest, error)
+	GetQuestsByLanguage(language string) ([]QuestMeta, error)
 	GetAllCheckpointsForQuest(questID string) ([]Checkpoint, error)
 	GetCheckpointByID(id string) (*Checkpoint, error)
 

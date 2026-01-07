@@ -1,53 +1,40 @@
-#############################
-# Generic Node.js Runtime Dockerfile for DevsArena
-# Supports React, Node.js, and Node-Express applications
-#############################
-FROM golang:1.24-alpine AS pty-builder
-# Build inside the pty module directory so the go.mod there is root
-WORKDIR /workspace
+FROM golang:1.23-alpine AS test_runner_build
 
-# Copy module files
-COPY internal/pty/go.mod go.mod
-COPY internal/pty/go.sum go.sum
-RUN go mod download
+WORKDIR /src
+COPY test-engine/test-runner.go ./test-runner.go
+RUN go build -trimpath -ldflags="-s -w" -o /out/devsarena-test-runner ./test-runner.go
 
-# Copy all pty source
-COPY internal/pty ./
-
-# Create secure directory for pty binary
-RUN mkdir -p /pty-service && chmod 700 /pty-service
-
-# Build static pty-server binary to /pty-service
-RUN CGO_ENABLED=0 GOOS=linux go build -ldflags="-w -s" -o /pty-service/pty-server .
-
-#############################
-# Stage 2: Node.js runtime with pty-server
-#############################
 FROM node:22-alpine
-RUN addgroup -S appgroup && adduser -S appuser -G appgroup
 
-RUN apk add --no-cache bash
+RUN apk add --no-cache bash socat procps
 
-# Create secure directory for pty binary
-RUN mkdir -p /pty-service && chmod 700 /pty-service
+# Create the low-privileged user
+RUN addgroup -g 1001 appgroup && adduser -u 1001 -G appgroup -S appuser
+
+# Baked test engine (Jest/Babel + configs)
+ENV DEVSARENA_ENGINE_ROOT=/opt/devsarena/test-engine
+
+WORKDIR ${DEVSARENA_ENGINE_ROOT}
+COPY test-engine/package.json ./package.json
+RUN npm install --no-audit --no-fund
+COPY test-engine/jest.config.cjs ./jest.config.cjs
+COPY test-engine/jest.setup.cjs ./jest.setup.cjs
+COPY test-engine/jest.reporter.cjs ./jest.reporter.cjs
+COPY test-engine/jest.empty-module.cjs ./jest.empty-module.cjs
+COPY test-engine/babel.config.cjs ./babel.config.cjs
+
+# Test runner binaries
+COPY --from=test_runner_build /out/devsarena-test-runner /usr/local/bin/devsarena-test-runner
+COPY test-engine/bin/test-runner-service.js /usr/local/bin/test-runner-service.js
+RUN chmod +x /usr/local/bin/devsarena-test-runner /usr/local/bin/test-runner-service.js
 
 WORKDIR /workspace
 
-# Copy pty-server binary into secure dir
-COPY --from=pty-builder /pty-service/pty-server /pty-service/pty-server
-RUN chmod 700 /pty-service/pty-server && chown appuser:appgroup /pty-service/pty-server
+# Give appuser permission to the workspace
+RUN chown appuser:appgroup /workspace
 
-# Copy application source files (works for all Node.js app types)
+# Preserve previous behavior: include build-context files (if any) in /workspace
 COPY . ./
 
-# Install nodemon globally for development (useful for all Node.js apps)
-RUN npm install -g nodemon
-
-# Switch to non-root
+# Drop to non-root user for all operations
 USER appuser
-
-# Expose common ports for different Node.js app types
-EXPOSE 8082 5173 3000 4000 5000 8000 9000
-
-# Start the pty server in background and keep the container alive
-ENTRYPOINT ["/pty-service/pty-server"]

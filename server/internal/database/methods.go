@@ -2,8 +2,6 @@ package database
 
 import (
 	"fmt"
-	"lms_v0/utils"
-	"os"
 	"strings"
 	"time"
 
@@ -62,21 +60,9 @@ func (s *service) GetQuestBySlug(slug string) (*Quest, error) {
 		Preload("Checkpoints.Hints").
 		Preload("Checkpoints.Resources").
 		First(&quest, "slug = ?", slug).Error
-
-	bucketName := os.Getenv("AWS_S3_BUCKET_NAME")
-	presignedBoilerPlateUrl, err := utils.GeneratePresignedUrl(bucketName, quest.BoilerPlateCode) // Clear boilerplate code
 	if err != nil {
 		return nil, err
 	}
-
-	for i, _ := range quest.Checkpoints {
-		presignedCheckpointUrl, err := utils.GeneratePresignedUrl(bucketName, quest.Checkpoints[i].TestingCode) // Clear test cases for checkpoints
-		if err != nil {
-			return nil, err
-		}
-		quest.Checkpoints[i].TestingCode = presignedCheckpointUrl
-	}
-	quest.BoilerPlateCode = presignedBoilerPlateUrl
 
 	return &quest, nil
 }
@@ -110,6 +96,45 @@ func (s *service) GetAllTechnologies() []string {
 	var technologies []string
 	s.db.Model(&Technology{}).Pluck("name", &technologies)
 	return technologies
+}
+
+// GetQuestsByLanguage returns quests filtered by technology/language
+func (s *service) GetQuestsByLanguage(language string) ([]QuestMeta, error) {
+	var quests []Quest
+
+	// Join with technology table to filter by language
+	err := s.db.
+		Preload("Category").
+		Preload("TechStack").
+		Preload("Topics").
+		Preload("Difficulty").
+		Joins("JOIN quest_technologies ON quests.id = quest_technologies.quest_id").
+		Joins("JOIN technologies ON quest_technologies.technology_id = technologies.id").
+		Where("technologies.name = ?", language).
+		Find(&quests).Error
+
+	if err != nil {
+		return nil, err
+	}
+
+	// Convert to QuestMeta structs
+	metas := make([]QuestMeta, len(quests))
+	for i, q := range quests {
+		metas[i] = QuestMeta{
+			ID:          q.ID,
+			Name:        q.Name,
+			Slug:        q.Slug,
+			Description: q.Description,
+			Image:       q.Image,
+			Category:    q.Category,
+			TechStack:   q.TechStack,
+			Topics:      q.Topics,
+			Difficulty:  q.Difficulty,
+			CreatedAt:   q.CreatedAt,
+			UpdatedAt:   q.UpdatedAt,
+		}
+	}
+	return metas, nil
 }
 func (s *service) GetAllConcepts() []string {
 	var concepts []string

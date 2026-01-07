@@ -34,6 +34,10 @@ export async function GET(
 
       // Get the latest progress logs
       const progressLogs = labInstance.ProgressLogs || []
+      
+      // Get test results and active checkpoint
+      const testResults = labInstance.TestResults || {}
+      const activeCheckpoint = labInstance.ActiveCheckpoint || null
 
       // Get the current status
       const currentStatus = labInstance.Status || 'unknown'
@@ -45,7 +49,9 @@ export async function GET(
         lastUpdated: labInstance.LastUpdatedAt || 0,
         createdAt: labInstance.CreatedAt || 0,
         progressLogs,
-        language: labInstance.Language || 'unknown'
+        language: labInstance.Language || 'unknown',
+        testResults,
+        activeCheckpoint
       })
 
     } catch (redisError) {

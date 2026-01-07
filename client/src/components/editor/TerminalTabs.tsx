@@ -8,8 +8,6 @@ import { ProjectParams } from '@/constants/FS_MessageTypes';
 const XTerminal = dynamic(() => import("./Terminal"), { ssr: false });
 
 export interface TerminalHandle {
-  sendCommand: (command: string) => void;
-  executeCommand: (command: string) => void;
   focus: () => void;
   forceFit: () => void;
 }

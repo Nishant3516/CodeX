@@ -570,21 +570,48 @@ export default function ExperimentalProjectPage() {
       const results = bootstrap.testResults[checkpointId];
       console.log('Test results:', results);
       if (results) {
+        const statusMessage = results.passed 
+          ? `✅ Checkpoint ${nextCheckpoint} tests passed!`
+          : `❌ Checkpoint ${nextCheckpoint} tests failed.`;
+        
         setConsoleLogs(prev => [...prev, {
           type: results.passed ? 'success' : 'error',
-          message: `${results.passed ? '✅' : '❌'} Checkpoint ${nextCheckpoint} tests ${results.passed ? 'passed' : 'failed'}. Passed: ${results.summary?.passedTests || 0}, Failed: ${results.summary?.failedTests || 0}`,
+          message: statusMessage,
           timestamp: new Date()
         }]);
 
-        // Add detailed test results
-        if (results.tests && Array.isArray(results.tests)) {
-          results.tests.forEach((test: any) => {
+        // Show duration if available
+        if (results.DurationMs) {
+          setConsoleLogs(prev => [...prev, {
+            type: 'info',
+            message: `⏱️ Completed in ${results.DurationMs}ms`,
+            timestamp: new Date()
+          }]);
+        }
+
+        // Show error details if test failed
+        if (!results.passed && results.Error) {
+          if (results.Error.Scenario) {
             setConsoleLogs(prev => [...prev, {
-              type: test.status === 'passed' ? 'success' : 'error',
-              message: `  ${test.status === 'passed' ? '✓' : '✗'} ${test.testName}${test.message ? ` - ${test.message}` : ''}`,
+              type: 'error',
+              message: `  Test: ${results.Error.Scenario}`,
               timestamp: new Date()
             }]);
-          });
+          }
+          if (results.Error.Message) {
+            setConsoleLogs(prev => [...prev, {
+              type: 'error',
+              message: `  Error: ${results.Error.Message}`,
+              timestamp: new Date()
+            }]);
+          }
+          if (results.Error.Hint) {
+            setConsoleLogs(prev => [...prev, {
+              type: 'info',
+              message: `  💡 Hint: ${results.Error.Hint}`,
+              timestamp: new Date()
+            }]);
+          }
         }
       }
 
@@ -599,86 +626,49 @@ export default function ExperimentalProjectPage() {
   }, [language, handleSave, bootstrap, setActiveRightTab]);
 
   // Handle run with smart command execution
+  const lastRunCommandRef = useRef<string | null>(null);
   const handleRun = useCallback(async () => {
-    if (!currentPlaygroundOption?.startCommands || currentPlaygroundOption.startCommands.length === 0) {
-      setConsoleLogs(prev => [...prev, {
-        type: 'warning',
-        message: 'No start commands configured for this project type',
-        timestamp: new Date()
-      }]);
+    const startList = currentPlaygroundOption?.startCommands || [];
+    if (startList.length === 0) {
+      setConsoleLogs(prev => [...prev, { type: 'warning', message: 'No start commands configured for this project type', timestamp: new Date() }]);
+      return;
+    }
+    // Avoid duplicate run of same primary command
+    const primary = startList[0];
+    if (isRunning && lastRunCommandRef.current === primary) {
+      setConsoleLogs(prev => [...prev, { type: 'warning', message: `Already running: ${primary}`, timestamp: new Date() }]);
       return;
     }
 
+    // Switch to preview tab to show terminal
+    setActiveRightTab('preview');
+
+    lastRunCommandRef.current = primary;
     setIsRunning(true);
-    setConsoleLogs(prev => [...prev, {
-      type: 'info',
-      message: 'Starting project...',
-      timestamp: new Date()
-    }]);
+    setConsoleLogs(prev => [...prev, { type: 'info', message: 'Starting project...', timestamp: new Date() }]);
 
     try {
-      // Check if node_modules exists (for npm-based projects)
-      const hasNodeModules = bootstrap.fileTree['node_modules'];
-      const needsInit = currentPlaygroundOption.initCommand && !hasNodeModules;
+      // Use sendRunCommand for better reliability
+      const initCommands = currentPlaygroundOption?.initCommand ? [currentPlaygroundOption.initCommand] : [];
+      const runCommand = startList.join(' && ');
       
-      if (needsInit) {
-        setConsoleLogs(prev => [...prev, {
-          type: 'info',
-          message: `Running initialization: ${currentPlaygroundOption.initCommand}`,
-          timestamp: new Date()
-        }]);
-        
-        // TODO: Execute init command via PTY socket
-        // This would typically send the init command to the terminal
-        // await bootstrap.executeCommand(currentPlaygroundOption.initCommand);
-        
-        // Simulate init command execution
-        await new Promise(resolve => setTimeout(resolve, 3000));
-        
-        setConsoleLogs(prev => [...prev, {
-          type: 'success',
-          message: 'Initialization completed successfully',
-          timestamp: new Date()
-        }]);
-      }
-
-      // Execute start commands
-      for (const command of currentPlaygroundOption.startCommands) {
-        setConsoleLogs(prev => [...prev, {
-          type: 'info',
-          message: `Executing: ${command}`,
-          timestamp: new Date()
-        }]);
-        
-        // TODO: Execute command via PTY socket
-        // await bootstrap.executeCommand(command);
-        
-        // Simulate command execution
-        await new Promise(resolve => setTimeout(resolve, 1000));
-      }
-
-      setConsoleLogs(prev => [...prev, {
-        type: 'success',
-        message: 'Project started successfully! Check the preview panel.',
-        timestamp: new Date()
-      }]);
+      setConsoleLogs(prev => [...prev, { type: 'info', message: `Exec: ${runCommand}`, timestamp: new Date() }]);
+      console.log("EXECUTING RUN COMMAND", { initCommands, runCommand });
       
-    } catch (error) {
-      setConsoleLogs(prev => [...prev, {
-        type: 'error',
-        message: `Failed to run project: ${error}`,
-        timestamp: new Date()
-      }]);
-    } finally {
+      bootstrap.sendPtyRunCommand(initCommands, runCommand);
+      
+      setConsoleLogs(prev => [...prev, { type: 'success', message: 'Commands sent. Waiting for server output...', timestamp: new Date() }]);
+      // Fallback: auto-clear running after 5 minutes if no manual stop (avoid stuck state)
+      setTimeout(() => {
+        setIsRunning(current => current && lastRunCommandRef.current === primary ? false : current);
+      }, 5 * 60 * 1000);
+    } catch (e:any) {
+      setConsoleLogs(prev => [...prev, { type: 'error', message: `Run failed: ${e?.message || e}`, timestamp: new Date() }]);
       setIsRunning(false);
+      return;
     }
-  }, [currentPlaygroundOption, bootstrap.fileTree]);
+  }, [currentPlaygroundOption, bootstrap.sendPtyRunCommand, isRunning]);
 
-  const handleClearConsole = useCallback(() => {
-    setConsoleLogs([]);
-  }, []);
-
-  // Show loading screen until connections are established AND file tree is loaded
   if (!loadingDone && !mergedIsReady) {
     return (
       <>
@@ -758,7 +748,7 @@ export default function ExperimentalProjectPage() {
             onSave={handleSave}
             isRunning={isRunning}
             isRunningTests={bootstrap.isRunningTests}
-            currentTestingCheckpoint={bootstrap.isRunningTests ? `${bootstrap.currentCheckpoint + 1}` : null}
+            currentTestingCheckpoint={bootstrap.currentTestingCheckpoint}
             language={language}
             loadingFile={loadingFile}
           />
@@ -786,7 +776,7 @@ export default function ExperimentalProjectPage() {
             testResults={bootstrap.testResults}
             loadingTestResults={loadingTestResults}
             isRunningTests={bootstrap.isRunningTests}
-            currentTestingCheckpoint={bootstrap.isRunningTests ? `${bootstrap.currentCheckpoint + 1}` : null}
+            currentTestingCheckpoint={bootstrap.currentTestingCheckpoint}
             params={{
               language,
               labId

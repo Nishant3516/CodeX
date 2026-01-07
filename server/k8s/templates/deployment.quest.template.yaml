@@ -6,6 +6,8 @@ metadata:
   labels:
     app: '{{.LabID}}'
     language: '{{.Language}}'
+    type: 'quest'
+    projectSlug: '{{.ProjectSlug}}'
 spec:
   replicas: 1
   selector:
@@ -15,7 +17,8 @@ spec:
     metadata:
       labels:
         app: '{{.LabID}}'
-    spec:
+        type: 'quest'
+    spec:  
       hostname: '{{.LabID}}'
       runtimeClassName: gvisor
       enableServiceLinks: false
@@ -23,14 +26,22 @@ spec:
         - name: workspace-volume
           emptyDir:
             sizeLimit: 2Gi
+        - name: internal-tests-volume
+          emptyDir:
+            sizeLimit: 512Mi
       initContainers:
-        - name: copy-r2-content
+        - name: copy-boilerplate-content
           image: amazon/aws-cli:latest
           command:
-            - /bin/sh 
+            - /bin/sh
             - -c
             - |
-              echo 'R2 bucket: {{.S3Bucket}}' && echo 'R2 key: {{.S3Key}}' && aws s3 cp s3://{{.S3Bucket}}/{{.S3Key}} /workspace --recursive --endpoint-url https://$R2_ACCOUNT_ID.r2.cloudflarestorage.com
+              echo 'Copying boilerplate from: s3://{{.S3Bucket}}/{{.BoilerplateKey}}'
+              if [ ! -z "{{.BoilerplateKey}}" ]; then
+                aws s3 cp "s3://{{.S3Bucket}}/{{.BoilerplateKey}}" /workspace --recursive --endpoint-url https://$R2_ACCOUNT_ID.r2.cloudflarestorage.com
+              else
+                echo "No boilerplate URL provided"
+              fi
           env:
             - name: AWS_ACCESS_KEY_ID
               valueFrom:
@@ -43,7 +54,7 @@ spec:
                   name: aws-secrets
                   key: R2_SECRET_KEY
             - name: AWS_DEFAULT_REGION
-              value: "auto" # R2 uses 'auto' region
+              value: "auto"
             - name: R2_ACCOUNT_ID
               valueFrom:
                 secretKeyRef:
@@ -60,9 +71,49 @@ spec:
             capabilities:
               drop:
                 - ALL
-{{ if .RequiresInitCommand }}
+        - name: copy-test-files
+          image: amazon/aws-cli:latest
+          command:
+            - /bin/sh
+            - -c
+            - |
+              echo 'Copying test files for project: {{.ProjectSlug}}'
+              echo 'Source path: s3://{{.S3Bucket}}/projects/{{.ProjectSlug}}/tests/'
+              aws s3 cp s3://{{.S3Bucket}}/projects/todo-app/tests/ /internal-test --recursive --endpoint-url https://$R2_ACCOUNT_ID.r2.cloudflarestorage.com || echo "No test files found for project {{.ProjectSlug}}"
+              echo "Test files copied to /internal-test:"
+              ls -la /internal-test || echo "Tests directory empty"
+          env:
+            - name: AWS_ACCESS_KEY_ID
+              valueFrom:
+                secretKeyRef:
+                  name: aws-secrets
+                  key: R2_ACCESS_KEY
+            - name: AWS_SECRET_ACCESS_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: aws-secrets
+                  key: R2_SECRET_KEY
+            - name: AWS_DEFAULT_REGION
+              value: "auto"
+            - name: R2_ACCOUNT_ID
+              valueFrom:
+                secretKeyRef:
+                  name: aws-secrets
+                  key: R2_ACCOUNT_ID
+          volumeMounts:
+            - name: internal-tests-volume
+              mountPath: /internal-test
+          securityContext:
+            runAsUser: 1000
+            runAsGroup: 1000
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: false
+            capabilities:
+              drop:
+                - ALL
+{{- if .RequiresInitCommand }}
         - name: setup-init
-          image: krishnawyvern/devsarena-node-runtime:v1.6  
+          image: krishnawyvern/devsarena-node-runtime:v1.7  
           command:
             - /bin/sh
             - -c
@@ -86,11 +137,11 @@ spec:
                 - DAC_OVERRIDE
                 - SETUID
                 - SETGID
-{{ end }}
+{{- end }}
 
       containers:
         - name: app-container
-          image: krishnawyvern/devsarena-node-runtime:v1.7
+          image: krishnawyvern/devsarena-node-runtime:v2.10
           ports:
 {{- if eq .Language "react" }}
             - name: vite-dev
@@ -108,6 +159,8 @@ spec:
           command: ["/bin/bash", "-c"]
           args:
             - |
+              # Start internal test runner service (pod-local only)
+              node /usr/local/bin/test-runner-service.js &
               exec -a "devsarena-init" /usr/bin/socat TCP-LISTEN:54321,bind=127.0.0.1,fork \
               EXEC:"/usr/bin/env -u KUBERNETES_SERVICE_PORT_HTTPS -u REDIS_URI -u KUBERNETES_SERVICE_HOST -u KUBERNETES_SERVICE_PORT -u KUBERNETES_PORT -u KUBERNETES_PORT_443_TCP -u KUBERNETES_PORT_443_TCP_ADDR -u KUBERNETES_PORT_443_TCP_PORT -u KUBERNETES_PORT_443_TCP_PROTO /bin/bash --login",pty,stderr,setsid,sigint,sane
           resources:
@@ -125,8 +178,24 @@ spec:
             capabilities:
               drop:
                 - ALL
-            procMount: Default
           env:
+            - name: REDIS_URI
+              valueFrom:
+                secretKeyRef:
+                  name: aws-secrets
+                  key: REDIS_URI
+            - name: LAB_ID
+              value: '{{.LabID}}'
+            - name: PROJECT_SLUG
+              value: '{{.ProjectSlug}}'
+            - name: QUEST_MODE
+              value: "true"
+            - name: SECURITY_MODE
+              value: "restricted"
+            - name: PTY_PING_INTERVAL
+              value: "30"
+            - name: PTY_PONG_TIMEOUT
+              value: "60"
             # Application ports for different languages
             - name: REACT_PORT
               value: "5173"
@@ -137,10 +206,13 @@ spec:
           volumeMounts:
             - name: workspace-volume
               mountPath: /workspace
+            - name: internal-tests-volume
+              mountPath: /internal-test
+              readOnly: true
           workingDir: /workspace
 
         - name: pty-container
-          image: krishnawyvern/devsarena-pty-relay:v1.2
+          image: krishnawyvern/devsarena-pty-relay:v2.4
           ports:
             - name: pty-ws
               containerPort: 8082
@@ -178,13 +250,15 @@ spec:
               value: "tcp"
             - name: PTY_BACKEND_ADDR
               value: "127.0.0.1:54321"
+            - name: TEST_RUNNER_PORT
+              value: "9901"
           volumeMounts:
             - name: workspace-volume
               mountPath: /workspace
           workingDir: /workspace
 
         - name: runner-container
-          image: krishnawyvern/devsarena-runner-service
+          image: krishnawyvern/devsarena-runner-service:v1.3
           ports:
             - name: fs-ws
               containerPort: 8081
@@ -209,6 +283,10 @@ spec:
           env:
             - name: LAB_ID
               value: '{{.LabID}}'
+            - name: PROJECT_SLUG
+              value: '{{.ProjectSlug}}'
+            - name: QUEST_MODE
+              value: "true"
             - name: AWS_ACCESS_KEY_ID
               valueFrom:
                 secretKeyRef:
@@ -220,7 +298,7 @@ spec:
                   name: aws-secrets
                   key: R2_SECRET_KEY
             - name: AWS_DEFAULT_REGION
-              value: "auto" # R2 uses 'auto' region
+              value: "auto"
             - name: AWS_S3_BUCKET_NAME
               valueFrom:
                 secretKeyRef:

@@ -4,7 +4,7 @@ import { motion } from 'framer-motion';
 import { 
   Eye,
   RotateCcw,
-  Download,
+  ExternalLink,
   Terminal, // Icon for the UI
   Power,      // Icon for the UI
   WifiOff     // Icon for the UI
@@ -138,7 +138,7 @@ export function PreviewPanel({ htmlContent, cssContent, jsContent, onExport, par
             className="p-1 text-gray-400 hover:text-white transition-colors"
             title="Open in New Tab"
           >
-            <Download className="w-4 h-4" />
+            <ExternalLink className="w-4 h-4" />
           </motion.button>
         </div>
       </div>

@@ -9,9 +9,9 @@ data:
   # API endpoint for lab cleanup
   CLEANUP_API_ENDPOINT: "https://api.devsarena.in/v0/playground/end"
   # Cronitor monitor URL
-  CRONITOR_MONITOR_URL: "https://cronitor.link/p/10964f824dd541c99e9b7d1fa52b97de"
+  CRONITOR_MONITOR_URL: "https://cronitor.link/p/10964f824dd541c99e9b7d1fa52b97de/E55Gp2"
   # Cronitor monitor key
-  CRONITOR_MONITOR_KEY: "xoHpkb"
+  CRONITOR_MONITOR_KEY: "E55Gp2"
   # Schedule for the cronjob (every hour)
   CRONJOB_SCHEDULE: "0 * * * *"
   # Job history limits
