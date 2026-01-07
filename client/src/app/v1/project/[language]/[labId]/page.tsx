@@ -364,67 +364,11 @@ export default function V1ProjectPage() {
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [handleSave]);
 
-  // Handle run
-  const lastRunCommandRef = useRef<string | null>(null);
-  const handleRun = useCallback(() => {
-    // Prefer explicit start command from playground option
-    const fallback = 'npm run dev';
-    const startCommand = currentPlaygroundOption?.startCommands?.[0]
-      || (language === 'node' ? 'node index.js' : fallback);
-
-    if (!terminalRef.current) {
-      setConsoleLogs(prev => [...prev, {
-        type: 'error',
-        message: '❌ Terminal not available yet. Please wait for connection...',
-        timestamp: new Date()
-      }]);
-      return;
-    }
-
-    // Avoid spamming duplicate run if already running same command
-    if (isRunning && lastRunCommandRef.current === startCommand) {
-      setConsoleLogs(prev => [...prev, {
-        type: 'warning',
-        message: `⚠ Already running: ${startCommand}`,
-        timestamp: new Date()
-      }]);
-      return;
-    }
-
-    lastRunCommandRef.current = startCommand;
-    setConsoleLogs(prev => [...prev, {
-      type: 'info',
-      message: `🚀 Executing: ${startCommand}`,
-      timestamp: new Date()
-    }]);
-
-    try {
-      terminalRef.current.executeCommand(startCommand);
-      setIsRunning(true);
-    } catch (e) {
-      setConsoleLogs(prev => [...prev, {
-        type: 'error',
-        message: `Failed to run command: ${startCommand}`,
-        timestamp: new Date()
-      }]);
-    }
-  }, [currentPlaygroundOption?.startCommands, language, isRunning]);
 
   const handleClearConsole = useCallback(() => {
     setConsoleLogs([]);
   }, []);
 
-  // NOW WE CAN HAVE CONDITIONAL RETURNS - ALL HOOKS ARE ABOVE THIS LINE
-
-  // Show loading screen until connections are established AND file tree is loaded
-  dlog('Main page debug:', {
-    isReady: mergedIsReady,
-    fileTreeKeys: Object.keys(bootstrap.fileTree),
-    fileTreeLength: Object.keys(bootstrap.fileTree).length,
-    fsConnected: mergedFsConnected,
-    ptyConnected: mergedPtyConnected,
-    bootstrapPhase: bootstrap.phase
-  });
   
   if (!loadingDone && !mergedIsReady) {
     return (
@@ -504,7 +448,7 @@ export default function V1ProjectPage() {
             fileContent={currentFileContent}
             isRunning={isRunning}
             onCodeChange={handleCodeChange}
-            onRun={handleRun}
+            onRun={()=>{}}
             onSave={handleSave}
             isLoading={loadingFile === activeFile}
           />
