@@ -101,22 +101,7 @@ export default function CodeEditor({
 }: CodeEditorProps) {
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number } | null>(null);
   const editorRef = useRef<ReactCodeMirrorRef>(null);
-  const [isAllowedToRun, setIsAllowedToRun] = useState(false);
 
-  function checkForExperimentalRunProp() {
-    try {
-      const params = new URLSearchParams(window.location.search);
-      return params.has('allow_experimental_run_btn');
-    } catch {
-      return false;
-    }
-  }
-
-  React.useEffect(() => {
-    if (checkForExperimentalRunProp()) {
-      setIsAllowedToRun(true);
-    }
-  }, []);
   // Determine if we're in experimental mode
   const isExperimental = openFiles.length > 0 || activeFile !== undefined;
   
@@ -288,7 +273,7 @@ const getFileIcon = (fileName: string) => {
           
           {/* Action Buttons */}
           <div className="flex items-center px-2 space-x-2">
-            {onRun && isAllowedToRun &&  (
+            {onRun  &&  (
               <button
                 onClick={onRun}
                 disabled={isRunning}
@@ -406,7 +391,7 @@ const getFileIcon = (fileName: string) => {
           <span className="text-white font-medium">{displayFileName}</span>
         </div>
         <div className="flex items-center gap-2">
-          {onRun && isAllowedToRun &&  (
+          {onRun  &&  (
             <button
               onClick={onRun}
               disabled={isRunning}
