@@ -989,8 +989,8 @@ export default function ExperimentalProjectPage() {
             questMetadata={questMetadata}
             loadingQuestData={loadingQuestData}
             checkpoints={checkpoints}
-            testResults={pty.testState.results}
-            isRunningTests={pty.testState.isRunning}
+            testResults={bootstrap.testResults}
+            isRunningTests={bootstrap.isRunningTests}
             activeCheckpoint={bootstrap.currentCheckpoint}
             currentTestingCheckpoint={pty.testState.currentCheckpoint}
             params={{
