@@ -3,7 +3,7 @@ import React, { useEffect, useRef } from 'react';
 import { Terminal } from '@xterm/xterm';
 import '@xterm/xterm/css/xterm.css'; // Import the CSS for styling
 import { ProjectParams } from '@/constants/FS_MessageTypes';
-import { buildPtyUrl } from '@/lib/pty';
+import { buildPtyUrl, sendPtyKillUserProcesses } from '@/lib/pty';
 
 const TerminalComponent = ({ params }: { params: ProjectParams }) => {
   const terminalRef = useRef<HTMLDivElement | null>(null);
@@ -75,8 +75,27 @@ const TerminalComponent = ({ params }: { params: ProjectParams }) => {
       term.writeln('Terminal connection error occurred.');
     };
 
+    const cleanupSentRef = { current: false };
+    const requestCleanup = () => {
+      if (cleanupSentRef.current) return;
+      cleanupSentRef.current = true;
+      sendPtyKillUserProcesses(socket);
+    };
+
+    const onBeforeUnload = () => requestCleanup();
+    const onPageHide = () => requestCleanup();
+    window.addEventListener('beforeunload', onBeforeUnload);
+    window.addEventListener('pagehide', onPageHide);
+
     // Clean up on component unmount
     return () => {
+      try {
+        requestCleanup();
+      } catch {}
+      try {
+        window.removeEventListener('beforeunload', onBeforeUnload);
+        window.removeEventListener('pagehide', onPageHide);
+      } catch {}
       try {
         if (socket) {
           socket.close();

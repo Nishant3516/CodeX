@@ -23,8 +23,8 @@ export function useProject(
           
           // Fetch all checkpoint assets and boilerplate in one call
           const { checkpoints, boilerplateCode } = await fetchCheckpointAssets(
-            quest.checkpoints, 
-            quest.boiler_plate_code // This should be the quest-level boilerplate ZIP URL
+            quest.checkpoints,
+            quest.boiler_plate_code
           );
 
           if (!canceled) {

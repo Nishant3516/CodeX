@@ -11,7 +11,6 @@ export async function POST(request: Request) {
     const backend = process.env.BACKEND_API_URL || 'http://localhost:8080';
  
     const url = `${backend}/v0/playground`;
-
     // Proxy the request to backend. Backend will generate labId and return data.
     const res = await fetch(url, {
       method: 'POST',

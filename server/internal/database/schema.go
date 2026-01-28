@@ -115,6 +115,7 @@ type Checkpoint struct {
 	ID              uuid.UUID      `json:"id" gorm:"type:uuid;primaryKey"`
 	Title           string         `json:"title"`
 	Description     string         `json:"description"`
+	OrderIndex      *int           `json:"order_index"`
 	Requirements    pq.StringArray `json:"requirements" gorm:"type:text[]"`
 	BoilerPlateCode string         `json:"boiler_plate_code,omitempty"`
 	TestingCode     string         `json:"testing_code,omitempty"`

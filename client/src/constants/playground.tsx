@@ -20,6 +20,7 @@ export type PlaygroundOption = {
   isLive: boolean;
   color: string;
   mainFile: string;
+  initCommand?: string;
   startCommands?: string[];
 };
 
@@ -33,7 +34,8 @@ export const PLAYGROUND_OPTIONS: PlaygroundOption[] = [
     icon: <Zap className="w-8 h-8 text-purple-400" />,
     color: "border-purple-500/50 hover:border-purple-500",
     mainFile: "App.jsx",
-    startCommands: ["npm install", "npm run dev"],
+    initCommand: "npm install",
+    startCommands: ["npm run dev"],
   },
   {
     id: "node-express",
@@ -44,7 +46,8 @@ export const PLAYGROUND_OPTIONS: PlaygroundOption[] = [
     icon: <Server className="w-8 h-8 text-red-400" />,
     color: "border-red-500/50 hover:border-red-500",
     mainFile: "index.js",
-    startCommands: ["npm install", "npm run dev"],
+    initCommand: "npm install",
+    startCommands: ["npm run dev"],
   },
   {
     id: "node",
@@ -59,7 +62,7 @@ export const PLAYGROUND_OPTIONS: PlaygroundOption[] = [
   },
   {
     id: "vanilla-js",
-    isLive: false,
+    isLive: true,
     label: "HTML / CSS / JS (Vanilla)",
     language: "vanilla-js",
     info: "🎨 Classic web development. HTML, CSS, and JavaScript - the foundation of the web.",

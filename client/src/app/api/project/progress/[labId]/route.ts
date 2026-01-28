@@ -12,7 +12,6 @@ export async function GET(
     if (!labId) {
       return NextResponse.json({ error: 'labId is required' }, { status: 400 })
     }
-    console.log("REDIS URL", REDIS_URL)
     // Create Redis client
     const client = createClient({ url: REDIS_URL })
 
@@ -33,26 +32,31 @@ export async function GET(
       const labInstance = JSON.parse(labData)
 
       // Get the latest progress logs
-      const progressLogs = labInstance.ProgressLogs || []
+      const progressLogs = labInstance.progressLogs || labInstance.ProgressLogs || []
+      
+      // Get test results and active checkpoint
+      const testResults = labInstance.testResults  || labInstance.TestResults || []
+      const activeCheckpoint = labInstance.activeCheckpoint || labInstance.ActiveCheckpoint || 1
 
       // Get the current status
-      const currentStatus = labInstance.Status || 'unknown'
-
+      const currentStatus = labInstance.status ||  labInstance.Status || 'unknown'
       return NextResponse.json({
         exists: true,
         labId,
         status: currentStatus,
-        lastUpdated: labInstance.LastUpdatedAt || 0,
-        createdAt: labInstance.CreatedAt || 0,
+        lastUpdated: labInstance.lastUpdatedAt || labInstance.LastUpdatedAt || 0,
+        createdAt: labInstance.createdAt || labInstance.CreatedAt || 0,
         progressLogs,
-        language: labInstance.Language || 'unknown'
+        language: labInstance.language || labInstance.Language || 'unknown',
+        testResults,
+        activeCheckpoint
       })
 
     } catch (redisError) {
       console.error('Redis error:', redisError)
       return NextResponse.json({ error: 'Redis connection failed' }, { status: 500 })
     } finally {
-      await client.disconnect()
+      await client.destroy()
     }
 
   } catch (err) {

@@ -7,7 +7,7 @@ interface CheckpointFloatingUIProps {
   currentCheckpoint: string;
   checkpointProgress: CheckpointProgress[];
   isTestingInProgress: boolean;
-  onCheckpointChange: (checkpointId: string) => boolean;
+  onCheckpointChange: (checkpointId: string) => void;
   canNavigateToCheckpoint: (checkpointId: string) => boolean;
 }
 
@@ -40,8 +40,19 @@ const CheckpointFloatingUI: React.FC<CheckpointFloatingUIProps> = ({
   };
 
   const calculateOverallProgress = () => {
-    const completedCheckpoints = checkpointProgress.filter(cp => cp.completed).length;
-    return Math.round((completedCheckpoints / projectData.checkpoints.length) * 100);
+    const knownIds = new Set<string>(projectData.checkpoints.map(cp => cp.id));
+    checkpointProgress.forEach(cp => knownIds.add(cp.checkpointId));
+
+    const completedIds = new Set<string>();
+    checkpointProgress.forEach(cp => {
+      if (cp.completed) {
+        completedIds.add(cp.checkpointId);
+      }
+    });
+
+    const total = Math.max(knownIds.size, 1);
+    const percent = Math.round((completedIds.size / total) * 100);
+    return Math.min(Math.max(percent, 0), 100);
   };
 
   const getCurrentCheckpointIndex = () => {

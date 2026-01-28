@@ -1,0 +1,62 @@
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: gvisor-installer
+  namespace: kube-system
+spec:
+  selector:
+    matchLabels:
+      name: gvisor-installer
+  template:
+    metadata:
+      labels:
+        name: gvisor-installer
+    spec:
+      hostPID: true
+      restartPolicy: Always
+      containers:
+      - name: installer
+        image: ubuntu:22.04
+        securityContext:
+          privileged: true
+        volumeMounts:
+        - name: host-bin
+          mountPath: /host/usr/local/bin
+        - name: host-conf
+          mountPath: /host/etc/containerd
+        command: ["/bin/sh", "-c"]
+        args:
+          - |
+            set -e
+            apt-get update && apt-get install -y wget ca-certificates
+            
+            # 1. Install runsc
+            ARCH=$(uname -m)
+            URL=https://storage.googleapis.com/gvisor/releases/release/latest/${ARCH}
+            wget ${URL}/runsc ${URL}/containerd-shim-runsc-v1
+            chmod +x runsc containerd-shim-runsc-v1
+            cp runsc containerd-shim-runsc-v1 /host/usr/local/bin/
+
+            # 2. Add config to host config.toml
+            # We use base64 to avoid YAML parsing errors with the [ ] characters
+            CONF_BASE64="W3BsdWdpbnMuImlvLmNvbnRhaW5lcmQuZ3JwYy52MS5jcmkiLmNvbnRhaW5lcmQucnVudGltZXMucnVuc2NdCiAgcnVudGltZV90eXBlID0gImlvLmNvbnRhaW5lcmQucnVuc2MudjEiCg=="
+            
+            if ! grep -q "runsc" /host/etc/containerd/config.toml; then
+              echo "Injecting gVisor config..."
+              echo "$CONF_BASE64" | base64 -d >> /host/etc/containerd/config.toml
+              
+              echo "Restarting containerd..."
+              nsenter --target 1 --mount --uts --ipc --net --pid systemctl restart containerd
+            else
+              echo "gVisor already present."
+            fi
+            
+            echo "Success."
+            sleep infinity
+      volumes:
+      - name: host-bin
+        hostPath:
+          path: /usr/local/bin
+      - name: host-conf
+        hostPath:
+          path: /etc/containerd

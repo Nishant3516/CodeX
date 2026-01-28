@@ -1,4 +1,5 @@
 import React, { FC, useState, useCallback, useRef } from 'react';
+import { PencilSquareIcon } from '@heroicons/react/24/solid';
 
 // Shimmer loading items for file explorer
 const ShimmerItem: FC<{ level?: number }> = ({ level = 0 }) => (
@@ -185,9 +186,9 @@ const FileItem: FC<FileItemProps> = ({
             onClick={(e) => e.stopPropagation()}
           />
         ) : (
-          <span className="text-sm flex-1 truncate">
-            {name}
-            {isDirty && <span className="text-orange-500 ml-1">●</span>}
+          <span className="text-sm flex-1 truncate flex items-center gap-1">
+            <span>{name}</span>
+            {isDirty && <PencilSquareIcon className="w-3 h-3 text-amber-500 flex-shrink-0" title="Unsaved changes" />}
           </span>
         )}
         

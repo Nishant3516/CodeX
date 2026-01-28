@@ -380,6 +380,38 @@ async  checkIfAvailable(url: string): Promise<boolean> {
     return this.ws?.readyState === WebSocket.OPEN;
   }
 
+  // Test execution helper methods
+  async runCheckpointTest(checkpointId: string, language: string): Promise<void> {
+    return this.sendOneWay('test_run_checkpoint', { 
+      checkpointId, 
+      language 
+    });
+  }
+
+  async runAllTests(language: string): Promise<void> {
+    return this.sendOneWay('test_run_all', { language });
+  }
+
+  async getTestResults(testRunId?: string): Promise<any> {
+    return this.sendMessage('test_get_results', { testRunId });
+  }
+
+  // Subscribe to test result messages
+  onTestMessage(handler: (data: any) => void): void {
+    this.messageHandlers.set('test_started', handler);
+    this.messageHandlers.set('test_completed', handler);
+    this.messageHandlers.set('test_progress', handler);
+    this.messageHandlers.set('test_results', handler);
+  }
+
+  // Unsubscribe from test result messages
+  offTestMessage(): void {
+    this.messageHandlers.delete('test_started');
+    this.messageHandlers.delete('test_completed');
+    this.messageHandlers.delete('test_progress');
+    this.messageHandlers.delete('test_results');
+  }
+
   // Expose current reconnect attempts (for diagnostics)
   getReconnectAttempts(): number { return this.reconnectAttempts; }
   // Allow external toggling of verbose debug inside socket (still gated by isDebug())

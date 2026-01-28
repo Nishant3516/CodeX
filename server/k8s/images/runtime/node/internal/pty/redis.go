@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"log"
 	"os"
 	"time"
@@ -43,13 +44,15 @@ const (
 )
 
 type LabInstanceEntry struct {
-	LabID          string
-	CreatedAt      int64
-	Language       string
-	DirtyReadPaths []string
-	Status         LabStatus
-	LastUpdatedAt  int64
-	ProgressLogs   []LabProgressEntry
+	LabID            string                  `json:"labId"`
+	CreatedAt        int64                   `json:"createdAt"`
+	Language         string                  `json:"language"`
+	ActiveCheckpoint int                     `json:"activeCheckpoint"`
+	DirtyReadPaths   []string                `json:"dirtyReadPaths"`
+	Status           LabStatus               `json:"status"`
+	LastUpdatedAt    int64                   `json:"lastUpdatedAt"`
+	ProgressLogs     []LabProgressEntry      `json:"progressLogs"`
+	TestResults      []DevsArenaRunnerResult `json:"testResults"`
 }
 
 type LabMonitoringEntry struct {
@@ -167,4 +170,60 @@ func UpdateLabMonitorQueue(labID string) {
 	}
 
 	log.Printf("Lab %s not found in monitor queue, skipping update", labID)
+}
+
+// StoreTestResultInLab stores a test result in the lab instance
+func StoreTestResultInLab(labID string, testResults DevsArenaRunnerFinal) error {
+	if RedisClient == nil {
+		return fmt.Errorf("redis client not initialized")
+	}
+
+	// Get existing instance
+	data, err := RedisClient.HGet(Context, "lab_instances", labID).Result()
+	if err != nil {
+		log.Printf("Failed to fetch lab instance %s: %v", labID, err)
+		return err
+	}
+
+	var instance LabInstanceEntry
+	err = json.Unmarshal([]byte(data), &instance)
+	if err != nil {
+		log.Printf("Failed to unmarshal lab instance: %v", err)
+		return err
+	}
+
+	// Initialize tests array if nil
+	if instance.TestResults == nil {
+		instance.TestResults = []DevsArenaRunnerResult{}
+	}
+
+	testResult := testResults.Results[len(testResults.Results)-1]
+
+	for _, result := range testResults.Results {
+		instance.TestResults = append(instance.TestResults, result)
+	}
+
+	instance.ActiveCheckpoint = testResult.Checkpoint
+
+	if testResult.Status == TestPassed {
+		instance.ActiveCheckpoint++
+	}
+	// Update last updated timestamp
+	instance.LastUpdatedAt = time.Now().Unix()
+
+	// Save updated instance
+	updatedData, err := json.Marshal(instance)
+	if err != nil {
+		log.Printf("Failed to marshal lab instance: %v", err)
+		return err
+	}
+
+	err = RedisClient.HSet(Context, "lab_instances", labID, updatedData).Err()
+	if err != nil {
+		log.Printf("Failed to update lab instance %s: %v", labID, err)
+		return err
+	}
+
+	log.Printf("Test result stored for lab %s, checkpoint %d", labID, testResult.Checkpoint)
+	return nil
 }

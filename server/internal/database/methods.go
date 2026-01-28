@@ -3,6 +3,7 @@ package database
 import (
 	"fmt"
 	"lms_v0/utils"
+	"log"
 	"os"
 	"strings"
 	"time"
@@ -49,35 +50,56 @@ func (s *service) GetAllQuests() ([]QuestMeta, error) {
 func (s *service) GetQuestBySlug(slug string) (*Quest, error) {
 	var quest Quest
 
-	// preload all relevant associations for a full quest view
 	err := s.db.
 		Preload("Category").
 		Preload("TechStack").
 		Preload("Topics").
 		Preload("Difficulty").
 		Preload("FinalTestCases").
-		Preload("Checkpoints").
-		Preload("Checkpoints.Testcases").
-		Preload("Checkpoints.Topics").
-		Preload("Checkpoints.Hints").
-		Preload("Checkpoints.Resources").
 		First(&quest, "slug = ?", slug).Error
 
-	bucketName := os.Getenv("AWS_S3_BUCKET_NAME")
-	presignedBoilerPlateUrl, err := utils.GeneratePresignedUrl(bucketName, quest.BoilerPlateCode) // Clear boilerplate code
 	if err != nil {
 		return nil, err
 	}
 
-	for i, _ := range quest.Checkpoints {
-		presignedCheckpointUrl, err := utils.GeneratePresignedUrl(bucketName, quest.Checkpoints[i].TestingCode) // Clear test cases for checkpoints
-		if err != nil {
-			return nil, err
-		}
-		quest.Checkpoints[i].TestingCode = presignedCheckpointUrl
-	}
-	quest.BoilerPlateCode = presignedBoilerPlateUrl
+	var checkpoints []Checkpoint
+	err = s.db.
+		Where("quest_id = ?", quest.ID).
+		Order("order_index IS NULL ASC").
+		Order("order_index ASC").
+		Order("created_at ASC").
+		Preload("Testcases").
+		Preload("Topics").
+		Preload("Hints").
+		Preload("Resources").
+		Find(&checkpoints).Error
 
+	if err != nil {
+		return nil, err
+	}
+
+	quest.Checkpoints = checkpoints
+	bucketName := os.Getenv("AWS_S3_BUCKET_NAME")
+	if bucketName == "" {
+		return &quest, nil
+	}
+
+	if quest.BoilerPlateCode != "" {
+		if presigned, err := utils.GeneratePresignedUrl(bucketName, quest.BoilerPlateCode); err == nil {
+			quest.BoilerPlateCode = presigned
+		} else {
+			log.Printf("presign boilerplate: %v", err)
+		}
+	}
+	for i := range quest.Checkpoints {
+		if quest.Checkpoints[i].TestingCode != "" {
+			if presigned, err := utils.GeneratePresignedUrl(bucketName, quest.Checkpoints[i].TestingCode); err == nil {
+				quest.Checkpoints[i].TestingCode = presigned
+			} else {
+				log.Printf("presign checkpoint %s: %v", quest.Checkpoints[i].ID, err)
+			}
+		}
+	}
 	return &quest, nil
 }
 
@@ -88,7 +110,9 @@ func (s *service) GetAllCheckpointsForQuest(questID string) ([]Checkpoint, error
 	if err != nil {
 		return nil, err
 	}
-	err = s.db.Where("quest_id = ?", uid).Find(&checkpoints).Error
+	err = s.db.Where("quest_id = ?", uid).Order("order_index IS NULL ASC").
+		Order("order_index ASC").
+		Order("created_at ASC").Find(&checkpoints).Error
 	return checkpoints, err
 }
 
@@ -110,6 +134,60 @@ func (s *service) GetAllTechnologies() []string {
 	var technologies []string
 	s.db.Model(&Technology{}).Pluck("name", &technologies)
 	return technologies
+}
+
+// GetQuestsByLanguage returns quests filtered by technology/language
+func (s *service) GetQuestsByLanguage(language string) ([]QuestMeta, error) {
+	var quests []Quest
+	langArray := make([]string, 0)
+	if language == "vanilla-js" {
+		langArray = append(langArray, "HTML", "CSS", "JavaScript")
+	} else {
+		langArray = append(langArray, language)
+	}
+	// Join with technology table to filter by language
+	var whereClause string
+	var args []interface{}
+	for i, lang := range langArray {
+		if i > 0 {
+			whereClause += " OR "
+		}
+		whereClause += "technologies.name = ?"
+		args = append(args, lang)
+	}
+	err := s.db.
+		Preload("Category").
+		Preload("TechStack").
+		Preload("Topics").
+		Preload("Difficulty").
+		Joins("JOIN quest_technologies ON quests.id = quest_technologies.quest_id").
+		Joins("JOIN technologies ON quest_technologies.technology_id = technologies.id").
+		Where(whereClause, args...).
+		Group("quests.id").
+		Find(&quests).Error
+
+	if err != nil {
+		return nil, err
+	}
+
+	// Convert to QuestMeta structs
+	metas := make([]QuestMeta, len(quests))
+	for i, q := range quests {
+		metas[i] = QuestMeta{
+			ID:          q.ID,
+			Name:        q.Name,
+			Slug:        q.Slug,
+			Description: q.Description,
+			Image:       q.Image,
+			Category:    q.Category,
+			TechStack:   q.TechStack,
+			Topics:      q.Topics,
+			Difficulty:  q.Difficulty,
+			CreatedAt:   q.CreatedAt,
+			UpdatedAt:   q.UpdatedAt,
+		}
+	}
+	return metas, nil
 }
 func (s *service) GetAllConcepts() []string {
 	var concepts []string
@@ -244,13 +322,15 @@ func (s *service) AddQuest(req AddQuestRequest) (string, error) {
 	}
 
 	// Create checkpoints
-	for _, cp := range req.Checkpoints {
+	for i, cp := range req.Checkpoints {
+		order := i + 1
 		checkpoint := Checkpoint{
 			ID:              uuid.New(),
 			Title:           cp.Title,
 			Description:     cp.Description,
 			Requirements:    pq.StringArray(cp.Requirements),
 			TestingCode:     cp.TestFileUrl,
+			OrderIndex:      &order,
 			BoilerPlateCode: "", // Empty for now
 			QuestID:         questID,
 			CreatedAt:       time.Now(),

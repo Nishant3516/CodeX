@@ -7,6 +7,8 @@ import (
 	"time"
 )
 
+var LabID = os.Getenv("LAB_ID")
+
 func main() {
 	// Initialize Redis first
 	InitRedis()
@@ -17,8 +19,8 @@ func main() {
 		w.WriteHeader(http.StatusOK)
 		w.Write([]byte("OK"))
 	})
-	labId := os.Getenv("LAB_ID")
-	UpdateLabInstanceProgress(labId, LabProgressEntry{
+
+	UpdateLabInstanceProgress(LabID, LabProgressEntry{
 		Timestamp:   time.Now().Unix(),
 		Status:      Active,
 		Message:     "Pseudo-terminal Service Started",

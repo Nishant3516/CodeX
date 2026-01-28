@@ -1,9 +1,12 @@
 "use client";
-import React, { useState, useCallback } from 'react';
+import React, { useState, useCallback, useRef, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Terminal, Plus, X } from 'lucide-react';
 import dynamic from 'next/dynamic';
 import { ProjectParams } from '@/constants/FS_MessageTypes';
+import { usePty } from '@/hooks/usePty';
+// Import the exact TerminalHandle type from Terminal to avoid ref incompatibility
+import type { TerminalHandle } from './Terminal';
 
 const XTerminal = dynamic(() => import("./Terminal"), { ssr: false });
 
@@ -14,15 +17,20 @@ interface TerminalTab {
 }
 
 interface TerminalTabsProps {
-  params: ProjectParams;
+  onTerminalReady?: (terminalRef: React.RefObject<TerminalHandle | null>) => void;
+    isConnected?: boolean;
+  connectionError?: string | null;
+  onRetry?: () => void;
+  onInput?: (data: string) => void;
+  onResize?: (cols: number, rows: number) => void;
 }
 
-export function TerminalTabs({ params }: TerminalTabsProps) {
+export function TerminalTabs({ onTerminalReady, isConnected, connectionError, onRetry, onInput, onResize }: TerminalTabsProps) {
   const [tabs, setTabs] = useState<TerminalTab[]>([
     { id: '1', name: 'Terminal', isActive: true }
   ]);
   const [nextTabId, setNextTabId] = useState(2);
-
+  const terminalRef = useRef<TerminalHandle>(null);
   const activeTab = tabs.find(tab => tab.isActive);
 
   const createNewTab = useCallback(() => {
@@ -126,9 +134,12 @@ export function TerminalTabs({ params }: TerminalTabsProps) {
               className="absolute inset-0"
             >
               <XTerminal 
-                key={`xterm-${activeTab.id}`}
-                params={params} 
-                terminalId={activeTab.id} 
+                  terminalId="main"
+                  isConnected={!!isConnected}
+                  connectionError={connectionError || null}
+                  onRetry={onRetry}
+                  onInput={onInput || (() => {})}
+                  onResize={onResize || (() => {})}
               />
             </motion.div>
           )}

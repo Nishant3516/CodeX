@@ -92,6 +92,48 @@ func generateSlug(title string) string {
 	return result.String()
 }
 
+// Implement only the methods we need; others are stubs
+func (s *service) GetQuestBySlug(slug string) (*database.Quest, error) {
+	var quest database.Quest
+
+	err := s.db.
+		Preload("Category").
+		Preload("TechStack").
+		Preload("Topics").
+		Preload("Difficulty").
+		Preload("FinalTestCases").
+		First(&quest, "slug = ?", slug).Error
+
+	if err != nil {
+		return nil, err
+	}
+
+	var checkpoints []database.Checkpoint
+	err = s.db.
+		Where("quest_id = ?", quest.ID).
+		Order("order_index IS NULL ASC").
+		Order("order_index ASC").
+		Order("created_at ASC").
+		Order("id ASC").
+		Preload("Testcases").
+		Preload("Topics").
+		Preload("Hints").
+		Preload("Resources").
+		Find(&checkpoints).Error
+
+	if err != nil {
+		return nil, err
+	}
+
+	quest.Checkpoints = checkpoints
+	return &quest, nil
+}
+
+func (s *service) GetQuestsByLanguage(string) ([]database.QuestMeta, error) {
+	return nil, fmt.Errorf("not implemented")
+}
+func (s *service) DeleteQuest(string) error { return fmt.Errorf("not implemented") }
+
 func (s *service) AddQuest(req database.AddQuestRequest) (string, error) {
 	log.Printf("AddQuest started: Title=%s, Category=%s, Difficulty=%s", req.Title, req.Category, req.Difficulty)
 	start := time.Now()
@@ -225,11 +267,13 @@ func (s *service) AddQuest(req database.AddQuestRequest) (string, error) {
 	// Create checkpoints
 	cpStart := time.Now()
 	log.Printf("Creating %d checkpoints", len(req.Checkpoints))
-	for _, cp := range req.Checkpoints {
+	for i, cp := range req.Checkpoints {
+		order := i + 1
 		checkpoint := database.Checkpoint{
 			ID:              uuid.New(),
 			Title:           cp.Title,
 			Description:     cp.Description,
+			OrderIndex:      &order,
 			Requirements:    pq.StringArray(cp.Requirements),
 			TestingCode:     cp.TestFileUrl,
 			BoilerPlateCode: "", // Empty for now
@@ -262,10 +306,6 @@ func (s *service) AddQuest(req database.AddQuestRequest) (string, error) {
 
 // The following interface methods are required by database.Service but unused here
 func (s *service) GetAllQuests() ([]database.QuestMeta, error) {
-	return nil, fmt.Errorf("not implemented in this handler")
-}
-
-func (s *service) GetQuestBySlug(slug string) (*database.Quest, error) {
 	return nil, fmt.Errorf("not implemented in this handler")
 }
 

@@ -2,210 +2,374 @@ package main
 
 import (
 	"encoding/json"
+	"fmt"
 	"io"
 	"log"
+	"net"
 	"net/http"
 	"os"
-	"os/exec"
+	"regexp"
+	"strings"
 	"sync"
 	"time"
 
-	"github.com/creack/pty"
 	"github.com/gorilla/websocket"
 )
 
-func getWorkspaceDir() string {
-	return "/workspace"
-}
+// --- CONSTANTS FOR MARKERS ---
+const (
+	MarkerStartPrefix = "__DEV_START:"
+	MarkerEndPrefix   = "__DEV_END:"
+)
 
-type ptyHandler struct {
+type PtyHandler struct {
 	conn *websocket.Conn
 	mu   sync.Mutex
 }
 
-type WSMessage struct {
+type inboundMessage struct {
+	Type string          `json:"type"`
+	Data json.RawMessage `json:"data,omitempty"`
+}
+
+type outboundMessage struct {
 	Type string `json:"type"`
-	Data string `json:"data,omitempty"`
+	Data any    `json:"data,omitempty"`
 }
 
-// startPtyServer sets up the HTTP handler for the pseudo-terminal WebSocket.
-func startPtyServer() {
-	http.HandleFunc("/pty", servePty)
-	log.Println("Pseudo-terminal WebSocket server listening on :8082")
+type testRequestEnvelope struct {
+	Type         string `json:"type"` // currently: "checkpoint"
+	CheckpointID string `json:"checkpointId"`
+	Language     string `json:"language"`
 }
 
-// servePty upgrades the HTTP connection to a WebSocket and starts the pty session.
+type runRequestEnvelope struct {
+	InitCommands []string `json:"initCommands"`
+	RunCommand   string   `json:"runCommand"`
+}
+
 func servePty(w http.ResponseWriter, r *http.Request) {
 	conn, err := websocketUpgrader.Upgrade(w, r, nil)
 	if err != nil {
-		log.Printf("Failed to upgrade to WebSocket for pty: %v", err)
+		log.Printf("WebSocket upgrade failed: %v", err)
 		return
 	}
 
-	handler := &ptyHandler{conn: conn}
-	go handler.startPtySession()
+	handler := &PtyHandler{conn: conn}
+	go handler.start()
 }
 
-// startPtySession creates a new pty and bridges its I/O to the WebSocket.
-func (h *ptyHandler) startPtySession() {
-	// Try to find an available shell - prefer bash, fallback to sh, then ash
-	var shellCmd string
+func (h *PtyHandler) start() {
+	defer h.conn.Close()
 
-	// 1) try SHELL env
-	if envShell := os.Getenv("SHELL"); envShell != "" {
-		if path, err := exec.LookPath(envShell); err == nil {
-			shellCmd = path
+	backendNetwork := os.Getenv("PTY_BACKEND_NETWORK")
+	if backendNetwork == "" {
+		backendNetwork = "unix"
+	}
+
+	backendAddr := os.Getenv("PTY_BACKEND_ADDR")
+	if backendAddr == "" {
+		backendAddr = "/tmp/pty/shell.sock"
+	}
+
+	// Retry logic for connecting to the PTY backend (socat might be starting)
+	var backendConn net.Conn
+	var err error
+	// Try a few times to connect in case the container is just coming up
+	for i := 0; i < 5; i++ {
+		backendConn, err = net.Dial(backendNetwork, backendAddr)
+		if err == nil {
+			break
 		}
+		time.Sleep(500 * time.Millisecond)
 	}
 
-	// 2) try names on PATH
-	if shellCmd == "" {
-		for _, name := range []string{"sh", "/bin/sh", "/bin/bash", "bash", "ash"} {
-			if path, err := exec.LookPath(name); err == nil {
-				shellCmd = path
-				break
-			}
-		}
-	}
-
-	// 3) fallback to absolute paths
-	if shellCmd == "" {
-		for _, path := range []string{"/bin/bash", "/bin/sh", "/bin/ash"} {
-			if _, err := os.Stat(path); err == nil {
-				shellCmd = path
-				break
-			}
-		}
-	}
-
-	if shellCmd == "" {
-		log.Printf("No shell found ($SHELL, PATH for bash/sh/ash, or /bin/*). PTY cannot start.")
-		h.conn.Close()
-		return
-	}
-
-	log.Printf("Using shell: %s", shellCmd)
-
-	// Diagnostics: stat the file and try a quick `--version` invocation to reveal
-	// whether the binary exists, is executable, or fails due to missing loader.
-	if fi, err := os.Stat(shellCmd); err == nil {
-		mode := fi.Mode()
-		log.Printf("Shell file info: size=%d mode=%v", fi.Size(), mode)
-		if mode&0111 == 0 {
-			log.Printf("Shell %s is not executable (mode %v)", shellCmd, mode)
-		}
-	} else {
-		log.Printf("Stat on shell %s failed: %v", shellCmd, err)
-	}
-
-	// Try running `<shell> --version` to capture a helpful error message if exec fails
-	testCmd := exec.Command(shellCmd, "--version")
-	if out, err := testCmd.CombinedOutput(); err != nil {
-		log.Printf("Test exec of shell %s failed: %v, output=%q", shellCmd, err, string(out))
-	} else {
-		log.Printf("Shell test output: %s", string(out))
-	}
-	// Start a new shell command
-	cmd := exec.Command(shellCmd)
-	log.Println("Starting pty with command:", cmd.Args)
-	cmd.Dir = getWorkspaceDir()
-	// Start the command with a pty
-	ptmx, err := pty.Start(cmd)
 	if err != nil {
-		log.Printf("Failed to start pty: %v", err)
-		h.conn.Close()
+		log.Printf("Failed to connect to PTY backend (%s %s): %v", backendNetwork, backendAddr, err)
+		h.sendMessage(outboundMessage{Type: "error", Data: "PTY backend unavailable"})
 		return
 	}
-	log.Printf("Started pty with PID %d", cmd.Process.Pid)
-	defer ptmx.Close()
+	defer backendConn.Close()
 
-	// Start a goroutine to copy output from the pty to the WebSocket
+	// Use a WaitGroup to ensure we don't close the socket while writing/reading
+	var wg sync.WaitGroup
+	wg.Add(2)
+
 	go func() {
-		for {
-			buf := make([]byte, 1024)
-			n, err := ptmx.Read(buf)
-			if err != nil {
-				log.Printf("Error reading from pty: %v", err)
-				h.conn.Close()
-				return
-			}
-			h.mu.Lock()
-			if err := h.conn.WriteMessage(websocket.TextMessage, buf[:n]); err != nil {
-				log.Printf("Error writing to WebSocket: %v", err)
-				h.mu.Unlock()
-				return
-			}
-			h.mu.Unlock()
-		}
+		defer wg.Done()
+		h.handlePtyOutput(backendConn)
 	}()
 
-	// Start a goroutine to send heartbeat messages to the client
 	go func() {
-		ticker := time.NewTicker(30 * time.Second)
-		defer ticker.Stop()
-		for {
-			select {
-			case <-ticker.C:
-				heartbeat := WSMessage{Type: "heartbeat"}
-				heartbeatBytes, _ := json.Marshal(heartbeat)
-				h.mu.Lock()
-				if err := h.conn.WriteMessage(websocket.TextMessage, heartbeatBytes); err != nil {
-					h.mu.Unlock()
-					return
-				}
-				h.mu.Unlock()
-			}
-		}
+		defer wg.Done()
+		h.handleWebSocketMessages(backendConn)
 	}()
 
-	// Read messages from the WebSocket and write to the pty
+	go h.sendHeartbeat()
+
+	wg.Wait()
+}
+
+func (h *PtyHandler) scanForEvents(chunk []byte) {
+	s := string(chunk)
+
+	// 1. Check for Command Start Marker
+	if strings.Contains(s, MarkerStartPrefix) {
+		parts := strings.Split(s, MarkerStartPrefix)
+		if len(parts) > 1 {
+			rest := parts[1]
+			endOfLine := strings.Index(rest, "'")
+			if endOfLine != -1 {
+				cmdName := rest[:endOfLine]
+				h.sendMessage(outboundMessage{Type: "run_executing", Data: map[string]string{"step": cmdName}})
+			}
+		}
+	}
+
+	if strings.Contains(s, MarkerEndPrefix) {
+		re := regexp.MustCompile(MarkerEndPrefix + `(.*?):(\d+)`)
+		matches := re.FindStringSubmatch(s)
+		if len(matches) == 3 {
+			cmdName := matches[1]
+			exitCode := matches[2]
+			status := "success"
+			if exitCode != "0" {
+				status = "error"
+			}
+			h.sendMessage(outboundMessage{Type: "run_completed", Data: map[string]string{
+				"step":   cmdName,
+				"status": status,
+				"code":   exitCode,
+			}})
+		}
+	}
+	//TODO: Should be updated with an optimal approach later
+	if strings.Contains(s, "Local:") || strings.Contains(s, "Listening on") || strings.Contains(s, "http://localhost") {
+		h.sendMessage(outboundMessage{Type: "server_ready", Data: s})
+	}
+}
+
+func (h *PtyHandler) handlePtyOutput(backend io.Reader) {
+	buf := make([]byte, 4096) // Larger buffer for efficiency
+	for {
+		n, err := backend.Read(buf)
+		if err != nil {
+			if err != io.EOF {
+				log.Printf("PTY read error: %v", err)
+			}
+			return
+		}
+
+		h.mu.Lock()
+		h.conn.WriteMessage(websocket.TextMessage, buf[:n])
+		h.mu.Unlock()
+
+		chunkCopy := make([]byte, n)
+		copy(chunkCopy, buf[:n])
+		go h.scanForEvents(chunkCopy)
+	}
+}
+
+func (h *PtyHandler) sendHeartbeat() {
+	ticker := time.NewTicker(30 * time.Second)
+	defer ticker.Stop()
+
+	for range ticker.C {
+		heartbeat := outboundMessage{Type: "heartbeat"}
+		h.sendMessage(heartbeat)
+	}
+}
+
+func (h *PtyHandler) handleWebSocketMessages(backend io.Writer) {
+	log.Printf("Starting WebSocket message handler")
 	for {
 		_, msg, err := h.conn.ReadMessage()
 		if err != nil {
-			log.Printf("Error reading from WebSocket: %v", err)
+			log.Printf("WebSocket read error: %v", err)
 			break
 		}
+		h.updateLabActivity()
 
-		// Update lab monitor queue with user interaction
-		labId := os.Getenv("LAB_ID")
-		if labId != "" {
-			UpdateLabMonitorQueue(labId)
+		var wsMsg inboundMessage
+		if err := json.Unmarshal(msg, &wsMsg); err != nil {
+			log.Printf("Failed to unmarshal WebSocket message: %v", err)
+			log.Printf("Treating as raw input, writing to PTY")
+			backend.Write(msg)
+			continue
 		}
 
-		// Parse the WebSocket message
-		var wsMsg WSMessage
-		if err := json.Unmarshal(msg, &wsMsg); err == nil {
-			switch wsMsg.Type {
-			case "input":
-				// Write input data to PTY
-				if _, err := io.WriteString(ptmx, wsMsg.Data); err != nil {
-					log.Printf("Error writing to pty: %v", err)
-					break
-				}
-			case "heartbeat":
-				// Respond to heartbeat from client
-				response := WSMessage{Type: "heartbeat_response"}
-				responseBytes, _ := json.Marshal(response)
-				h.mu.Lock()
-				if err := h.conn.WriteMessage(websocket.TextMessage, responseBytes); err != nil {
-					log.Printf("Error sending heartbeat response: %v", err)
-					h.mu.Unlock()
-					break
-				}
-				h.mu.Unlock()
-			case "heartbeat_response":
-				// Received heartbeat response from client, do nothing
-			default:
-				log.Printf("Unknown message type: %s", wsMsg.Type)
+		// Only log interesting messages to keep logs clean
+		if wsMsg.Type != "input" && wsMsg.Type != "heartbeat_response" {
+			log.Printf("Received WebSocket message: %+v", wsMsg)
+		}
+
+		switch wsMsg.Type {
+		case "input":
+			var data string
+			if len(wsMsg.Data) > 0 {
+				_ = json.Unmarshal(wsMsg.Data, &data)
 			}
-		} else {
-			// Fallback for raw strings (legacy support)
-			if _, err := ptmx.Write(msg); err != nil {
-				log.Printf("Error writing raw message to pty: %v", err)
-				break
-			}
+			io.WriteString(backend, data)
+
+		case "kill_user_processes":
+			h.handleKillUserProcesses(backend)
+
+		case "heartbeat":
+			// Server-side heartbeat handling if client sends one
+			h.sendMessage(outboundMessage{Type: "heartbeat_response"})
+
+		case "heartbeat_response":
+			// Quiet handling of client response
+
+		case "test":
+			h.handleTestMessage(wsMsg.Data)
+
+		case "run":
+			h.handleRunMessage(wsMsg.Data, backend)
+
+		default:
+			log.Printf("Unknown message type: %s", wsMsg.Type)
+		}
+	}
+}
+
+func (h *PtyHandler) handleTestMessage(raw json.RawMessage) {
+	// client sends: { type: "test", data: JSON.stringify({...}) }
+	// so `data` is a JSON string containing a JSON object.
+	var payloadStr string
+	if len(raw) > 0 {
+		_ = json.Unmarshal(raw, &payloadStr)
+	}
+
+	if strings.TrimSpace(payloadStr) == "" {
+		h.sendMessage(outboundMessage{Type: "test_error", Data: map[string]any{"message": "missing test payload"}})
+		return
+	}
+
+	var req testRequestEnvelope
+	if err := json.Unmarshal([]byte(payloadStr), &req); err != nil {
+		h.sendMessage(outboundMessage{Type: "test_error", Data: map[string]any{"message": "invalid test payload: " + err.Error()}})
+		return
+	}
+
+	fmt.Printf("\n Received the test request, %v", req)
+	if req.Type != "checkpoint" || strings.TrimSpace(req.CheckpointID) == "" {
+		h.sendMessage(outboundMessage{Type: "test_error", Data: map[string]any{"message": "unsupported test request"}})
+		return
+	}
+
+	fmt.Printf("Valid checkpoint ID found: %s\n, starting tests", req.CheckpointID)
+
+	h.sendMessage(outboundMessage{Type: "test_started", Data: map[string]any{"checkpointId": req.CheckpointID}})
+
+	go func() {
+		// Calling the existing external function provided in your project context
+		result, err := RunCheckpointTestForClient(req.CheckpointID, req.Language)
+		if err != nil {
+			h.sendMessage(outboundMessage{Type: "test_error", Data: map[string]any{"checkpointId": req.CheckpointID, "message": err.Error()}})
+			return
+		}
+		// Calling the existing external function provided in your project context
+		StoreTestResultInLab(os.Getenv("LAB_ID"), result)
+		h.sendMessage(outboundMessage{Type: "test_completed", Data: result})
+	}()
+}
+func wrapCommand(name, cmd string) string {
+	return fmt.Sprintf("echo '%s%s'; %s; echo '%s%s:$?'", MarkerStartPrefix, name, cmd, MarkerEndPrefix, name)
+}
+
+func (h *PtyHandler) handleRunMessage(raw json.RawMessage, backend io.Writer) {
+	var payloadStr string
+	if len(raw) > 0 {
+		_ = json.Unmarshal(raw, &payloadStr)
+	}
+
+	if strings.TrimSpace(payloadStr) == "" {
+		h.sendMessage(outboundMessage{Type: "run_error", Data: map[string]any{"message": "missing run payload"}})
+		return
+	}
+
+	var req runRequestEnvelope
+	if err := json.Unmarshal([]byte(payloadStr), &req); err != nil {
+		h.sendMessage(outboundMessage{Type: "run_error", Data: map[string]any{"message": "invalid run payload: " + err.Error()}})
+		return
+	}
+
+	log.Printf("Received run request: init=%v, run=%s", req.InitCommands, req.RunCommand)
+	h.sendMessage(outboundMessage{Type: "run_started", Data: map[string]any{"message": "Starting commands..."}})
+
+	// Check if node_modules exists (Optional check kept from original, but inline)
+	checkNodeModules := "[ -d /workspace/node_modules ] && echo 'EXISTS' || echo 'MISSING'\n"
+	_, _ = io.WriteString(backend, checkNodeModules)
+	time.Sleep(100 * time.Millisecond)
+
+	// Execute init commands if provided (e.g. npm install)
+	for i, initCmd := range req.InitCommands {
+		if strings.TrimSpace(initCmd) != "" {
+			log.Printf("Executing init command: %s", initCmd)
+			stepName := fmt.Sprintf("init_%d", i)
+			// WRAP THE COMMAND
+			wrapped := wrapCommand(stepName, initCmd)
+			_, _ = io.WriteString(backend, wrapped+"\n")
+			time.Sleep(200 * time.Millisecond)
 		}
 	}
 
-	cmd.Process.Kill()
+	// Execute run command (e.g. npm run dev)
+	if strings.TrimSpace(req.RunCommand) != "" {
+		log.Printf("Executing run command: %s", req.RunCommand)
+		// WRAP THE COMMAND
+		wrapped := wrapCommand("main_run", req.RunCommand)
+		_, _ = io.WriteString(backend, wrapped+"\n")
+		// We rely on scanForEvents to send the "run_executing" message now
+	}
+}
+
+func (h *PtyHandler) handleKillUserProcesses(backend io.Writer) {
+	log.Printf("Handling kill_user_processes (Fire & Forget)")
+
+	_, _ = backend.Write([]byte{3, 3})
+
+	cleanupScript := `
+{
+  stty -echo  # Silence output
+  
+  # 1. Kill any background jobs (like the one we just Ctrl+C'd)
+  kill -9 $(jobs -p) 2>/dev/null || true
+  
+  # 2. Kill all processes owned by this user
+  me=$$
+  my_uid=$(id -u)
+  
+  # Get all PIDs for this user
+  pids=$(pgrep -u $my_uid)
+  
+  for pid in $pids; do
+    # Protect the shell ($me) and the PTY bridge ($PPID)
+    if [ "$pid" != "$me" ] && [ "$pid" != "$PPID" ]; then
+       kill -9 $pid 2>/dev/null || true
+    fi
+  done
+  
+  stty echo   # Restore echo for the next session
+  clear       # Wipe the screen
+}
+`
+	// Execute immediately
+	_, _ = io.WriteString(backend, cleanupScript+"\n")
+}
+
+func (h *PtyHandler) updateLabActivity() {
+	if labID := os.Getenv("LAB_ID"); labID != "" {
+		// External function provided in project context
+		UpdateLabMonitorQueue(labID)
+	}
+}
+
+func (h *PtyHandler) sendMessage(msg outboundMessage) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+
+	data, _ := json.Marshal(msg)
+	h.conn.WriteMessage(websocket.TextMessage, data)
 }

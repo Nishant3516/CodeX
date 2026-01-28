@@ -1,9 +1,10 @@
 "use client";
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useRef } from 'react';
 import { motion } from 'framer-motion';
 import { Terminal, RotateCcw } from 'lucide-react';
 import { ProjectParams } from '@/constants/FS_MessageTypes';
 import { TerminalTabs } from './TerminalTabs';
+import type { TerminalHandle } from './Terminal';
 interface LogEntry {
   type: 'info' | 'success' | 'error' | 'warning';
   message: string;
@@ -14,10 +15,11 @@ interface TerminalPanelProps {
   logs: LogEntry[];
   isRunning: boolean;
   onClear: () => void;
-  params: ProjectParams
+  params: ProjectParams;
+  onTerminalReady?: (terminalRef: React.RefObject<TerminalHandle | null>) => void;
 }
 
-export function TerminalPanel({ logs, isRunning, onClear, params }: TerminalPanelProps) {
+export function TerminalPanel({ logs, isRunning, onClear, params, onTerminalReady }: TerminalPanelProps) {
   const [terminalKey, setTerminalKey] = useState(0);
   
   const getLogColor = (type: string) => {
@@ -36,7 +38,7 @@ export function TerminalPanel({ logs, isRunning, onClear, params }: TerminalPane
   return (
     <div className="h-full  flex flex-col overflow-hidden">
       <div className="flex-1 overflow-hidden">
-        <TerminalTabs key={terminalKey} params={params} />
+        {/* <TerminalTabs key={terminalKey} params={params} onTerminalReady={onTerminalReady} /> */}
       </div>
     </div>
   );

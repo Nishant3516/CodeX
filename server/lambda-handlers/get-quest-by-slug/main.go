@@ -44,6 +44,12 @@ func (s *service) GetAllQuests() ([]database.QuestMeta, error) {
 func (s *service) AddQuest(req database.AddQuestRequest) (string, error) {
 	return "", fmt.Errorf("not implemented in this handler")
 }
+
+func (s *service) DeleteQuest(string) error { return fmt.Errorf("not implemented") }
+func (s *service) GetQuestsByLanguage(string) ([]database.QuestMeta, error) {
+	return nil, fmt.Errorf("not implemented")
+}
+
 func (s *service) GetAllTechnologies() []string { return nil }
 func (s *service) GetAllConcepts() []string     { return nil }
 func (s *service) GetAllCategories() []string   { return nil }
@@ -51,23 +57,37 @@ func (s *service) GetAllDifficulties() []string { return nil }
 
 func (s *service) GetQuestBySlug(slug string) (*database.Quest, error) {
 	var quest database.Quest
-	log.Printf("Fetching quest with slug: %s", slug)
-	// Preload all relevant associations for a full quest view
+
 	err := s.db.
 		Preload("Category").
 		Preload("TechStack").
 		Preload("Topics").
 		Preload("Difficulty").
 		Preload("FinalTestCases").
-		Preload("Checkpoints").
-		Preload("Checkpoints.Testcases").
-		Preload("Checkpoints.Topics").
-		Preload("Checkpoints.Hints").
-		Preload("Checkpoints.Resources").
 		First(&quest, "slug = ?", slug).Error
+
 	if err != nil {
 		return nil, err
 	}
+
+	var checkpoints []database.Checkpoint
+	err = s.db.
+		Where("quest_id = ?", quest.ID).
+		Order("order_index IS NULL ASC").
+		Order("order_index ASC").
+		Order("created_at ASC").
+		Order("id ASC").
+		Preload("Testcases").
+		Preload("Topics").
+		Preload("Hints").
+		Preload("Resources").
+		Find(&checkpoints).Error
+
+	if err != nil {
+		return nil, err
+	}
+
+	quest.Checkpoints = checkpoints
 
 	bucketName := os.Getenv("AWS_S3_BUCKET_NAME")
 	if bucketName == "" {

@@ -8,6 +8,11 @@ export const FS_EDIT_FILE_META = "fs_edit_file_meta";
 export const FS_FETCH_QUEST_META = "fs_fetch_quest_meta";
 export const FS_INITIALIZE_CLIENT = "fs_initialize_client";
 
+// Test execution message types
+export const TEST_RUN_CHECKPOINT = "test_run_checkpoint";
+export const TEST_RUN_ALL = "test_run_all";
+export const TEST_GET_RESULTS = "test_get_results";
+
 export type ProjectParams = {
     labId:string;
     language:string
@@ -20,7 +25,10 @@ export type FSMessageType =
     | typeof FS_NEW_FILE
     | typeof FS_DELETE_FILE
     | typeof FS_EDIT_FILE_META
-    | typeof FS_FETCH_QUEST_META;
+    | typeof FS_FETCH_QUEST_META
+    | typeof TEST_RUN_CHECKPOINT
+    | typeof TEST_RUN_ALL
+    | typeof TEST_GET_RESULTS;
 
 export interface EventMessage {
     type: FSMessageType | string;
@@ -86,6 +94,46 @@ export interface QuestMetaResponse {
     files: FileInfo[];
 }
 
+// Test execution payload interfaces
+export interface RunCheckpointTestPayload {
+    checkpointId: string;
+    language: string;
+}
+
+export interface RunAllTestsPayload {
+    language: string;
+}
+
+export interface GetTestResultsPayload {
+    testRunId?: string;
+}
+
+// Test execution response interfaces
+export interface TestResult {
+    testName: string;
+    status: 'passed' | 'failed' | 'error';
+    message?: string;
+    errorDetails?: string;
+    duration: number; // in milliseconds
+}
+
+export interface TestSummary {
+    totalTests: number;
+    passedTests: number;
+    failedTests: number;
+    errorTests: number;
+}
+
+export interface CheckpointTestResult {
+    checkpointId: string;
+    status: 'passed' | 'failed' | 'error';
+    tests: TestResult[];
+    summary: TestSummary;
+    startTime: string;
+    endTime: string;
+    duration: number;
+}
+
 /* Standardized WebSocket response */
 export type WSStatus = "success" | "error" | "info";
 
@@ -115,6 +163,11 @@ export const RESPONSE_ERROR = "error";
 export const RESPONSE_CONNECTION = "connection";
 export const RESPONSE_HEARTBEAT = "heartbeat";
 export const RESPONSE_INFO = "info";
+// Test execution response types
+export const RESPONSE_TEST_STARTED = "test_started";
+export const RESPONSE_TEST_COMPLETED = "test_completed";
+export const RESPONSE_TEST_PROGRESS = "test_progress";
+export const RESPONSE_TEST_RESULTS = "test_results";
 
 export type WSResponseType =
     | typeof RESPONSE_DIR_CONTENT
@@ -127,4 +180,8 @@ export type WSResponseType =
     | typeof RESPONSE_ERROR
     | typeof RESPONSE_CONNECTION
     | typeof RESPONSE_HEARTBEAT
-    | typeof RESPONSE_INFO;
+    | typeof RESPONSE_INFO
+    | typeof RESPONSE_TEST_STARTED
+    | typeof RESPONSE_TEST_COMPLETED
+    | typeof RESPONSE_TEST_PROGRESS
+    | typeof RESPONSE_TEST_RESULTS;

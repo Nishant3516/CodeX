@@ -31,6 +31,18 @@ type SpinUpParams struct {
 	ShouldCreateNamespace bool
 }
 
+// SpinUpQuestParams holds variables needed for quest templates.
+type SpinUpQuestParams struct {
+	LabID                 string
+	Language              string
+	ProjectSlug           string
+	S3Bucket              string
+	BoilerplateKey        string
+	TestFilesKey          string
+	Namespace             string
+	ShouldCreateNamespace bool
+}
+
 type SpinUpWithInit struct {
 	LabID                 string
 	Language              string
@@ -85,6 +97,47 @@ func CreateLanguageInitCommandsConfigMapIfDoesNotExists() error {
 	}
 
 	log.Printf("Language init commands ConfigMap '%s' created successfully", configMapName)
+
+	return nil
+}
+
+// CreateTestRunnerConfigMapIfDoesNotExists creates a configmap for test runner commands
+func CreateTestRunnerConfigMapIfDoesNotExists() error {
+	yamlFilePath := "k8s/templates/test-runner-commands-configmap.template.yaml"
+	configMapName := "test-runner-commands"
+	namespace := "devsarena"
+
+	_, err := ClientSet.CoreV1().ConfigMaps(namespace).Get(context.TODO(), configMapName, metav1.GetOptions{})
+	if err == nil {
+		log.Printf("Test runner commands ConfigMap '%s' already exists, skipping.", configMapName)
+		return nil
+	}
+	if !errors.IsNotFound(err) {
+		return err
+	}
+
+	var processedYaml bytes.Buffer
+	tmpl, err := template.ParseFiles(yamlFilePath)
+	if err != nil {
+		return fmt.Errorf("error parsing test runner configmap template file %s: %w", yamlFilePath, err)
+	}
+
+	if err := tmpl.Execute(&processedYaml, nil); err != nil {
+		return fmt.Errorf("error executing test runner configmap template: %w", err)
+	}
+
+	var configMap corev1.ConfigMap
+	if err := yaml.Unmarshal(processedYaml.Bytes(), &configMap); err != nil {
+		return fmt.Errorf("error unmarshalling test runner configmap YAML: %w", err)
+	}
+
+	log.Printf("Creating test runner commands ConfigMap '%s'", configMap.Name)
+	_, err = ClientSet.CoreV1().ConfigMaps(namespace).Create(context.TODO(), &configMap, metav1.CreateOptions{})
+	if err != nil {
+		return err
+	}
+
+	log.Printf("Test runner commands ConfigMap '%s' created successfully", configMapName)
 
 	return nil
 }
@@ -172,6 +225,102 @@ func SpinUpPodWithLanguage(params SpinUpParams) error {
 	}
 
 	log.Printf("Successfully spun up all resources for LabID: %s", params.LabID)
+	return nil
+}
+
+// SpinUpQuestPod creates a pod environment specifically for quest-based projects with separate test file handling
+func SpinUpQuestPod(params SpinUpQuestParams) error {
+	log.Printf("Starting to spin up quest pod for LabID: %s, ProjectSlug: %s, Language: %s", params.LabID, params.ProjectSlug, params.Language)
+
+	progress := utils.LabProgressEntry{
+		Timestamp:   time.Now().Unix(),
+		Status:      utils.Booting,
+		Message:     "Starting to spin up quest pod resources",
+		ServiceName: utils.SERVER_SERVICE,
+	}
+	utils.RedisUtilsInstance.UpdateLabInstanceProgress(params.LabID, progress)
+
+	// Create language init commands configmap if needed
+	if err := CreateLanguageInitCommandsConfigMapIfDoesNotExists(); err != nil {
+		log.Printf("Warning: Could not create language init commands configmap: %v", err)
+	}
+
+	// Create test runner commands configmap if needed
+	if err := CreateTestRunnerConfigMapIfDoesNotExists(); err != nil {
+		log.Printf("Warning: Could not create test runner commands configmap: %v", err)
+	}
+
+	// Get init command for the language
+	requiresInitCmd := ""
+	var requiresInitCmdPtr *string
+	if initCmd, err := GetInitCommandForLanguage(params.Language); err == nil && initCmd != "" {
+		requiresInitCmd = initCmd
+		requiresInitCmdPtr = &requiresInitCmd
+		log.Printf("Init command found for language '%s': %s", params.Language, initCmd)
+	} else {
+		log.Printf("No init command required for language '%s'", params.Language)
+	}
+
+	// Update quest params to use new test file structure
+	// Test files are now located at: devsarena/projects/{projectSlug}/tests/
+	params.TestFilesKey = fmt.Sprintf("devsarena/projects/%s/tests/", params.ProjectSlug)
+
+	// Convert quest params to deployment params
+	deploymentParams := SpinUpWithInit{
+		LabID:                 params.LabID,
+		Language:              params.Language,
+		AppName:               fmt.Sprintf("%s-%s", params.Language, params.LabID),
+		S3Bucket:              params.S3Bucket,
+		S3Key:                 fmt.Sprintf("quests/%s/%s", params.ProjectSlug, params.LabID), // Quest-specific workspace path
+		Namespace:             params.Namespace,
+		ShouldCreateNamespace: params.ShouldCreateNamespace,
+		RequiresInitCommand:   requiresInitCmdPtr,
+	}
+
+	// Convert to SpinUpParams for shared functions
+	spinUpParams := SpinUpParams{
+		LabID:                 params.LabID,
+		Language:              params.Language,
+		AppName:               deploymentParams.AppName,
+		S3Bucket:              params.S3Bucket,
+		S3Key:                 deploymentParams.S3Key,
+		Namespace:             params.Namespace,
+		ShouldCreateNamespace: params.ShouldCreateNamespace,
+	}
+
+	// Create namespace if needed
+	if params.ShouldCreateNamespace {
+		if err := CreateNamespaceFromYamlIfDoesNotExists(spinUpParams); err != nil {
+			return fmt.Errorf("could not create namespace: %w", err)
+		}
+	}
+
+	// Create quest deployment using quest template
+	if err := CreateQuestDeploymentFromYamlIfDoesNotExists(params, requiresInitCmdPtr); err != nil {
+		return fmt.Errorf("could not create quest deployment: %w", err)
+	}
+
+	// Create service
+	if err := CreateServiceFromYamlIfDoesNotExists(spinUpParams); err != nil {
+		return fmt.Errorf("could not create service: %w", err)
+	}
+
+	// Create ingress
+	if err := CreateIngressFromYamlIfDoesNotExists(spinUpParams); err != nil {
+		return fmt.Errorf("could not create ingress: %w", err)
+	}
+
+	// Create SSL progress job
+	if err := CreateSSLProgressJobFromYamlIfDoesNotExists(spinUpParams); err != nil {
+		return fmt.Errorf("could not create SSL progress job: %w", err)
+	}
+
+	// Create cleanup cronjob
+	if err := CreateCleanupCronJobFromYamlIfDoesNotExists(spinUpParams); err != nil {
+		return fmt.Errorf("could not create cleanup cronjob: %w", err)
+	}
+
+	log.Printf("Successfully spun up all quest resources for LabID: %s", params.LabID)
 	return nil
 }
 
@@ -267,6 +416,71 @@ func CreateDeploymentFromYamlIfDoesNotExists(params SpinUpWithInit) error {
 		Timestamp:   time.Now().Unix(),
 		Status:      utils.Booting,
 		Message:     fmt.Sprintf("Deployment '%s' created successfully", deployment.Name),
+		ServiceName: utils.SERVER_SERVICE,
+	}
+	utils.RedisUtilsInstance.UpdateLabInstanceProgress(params.LabID, progress)
+	return nil
+}
+
+// CreateQuestDeploymentFromYamlIfDoesNotExists creates a quest-specific deployment with test runner support
+func CreateQuestDeploymentFromYamlIfDoesNotExists(params SpinUpQuestParams, requiresInitCommand *string) error {
+	yamlFilePath := "k8s/templates/deployment.quest.template.yaml"
+	deploymentName := fmt.Sprintf("%s-deployment", params.LabID)
+
+	_, err := ClientSet.AppsV1().Deployments(params.Namespace).Get(context.TODO(), deploymentName, metav1.GetOptions{})
+	if err == nil {
+		log.Printf("Quest deployment '%s' already exists, skipping.", deploymentName)
+		return nil
+	}
+	if !errors.IsNotFound(err) {
+		log.Printf("Error checking for existing quest deployment '%s': %v", deploymentName, err)
+		return err
+	}
+
+	// Create template params that include quest-specific data
+	questDeploymentParams := struct {
+		SpinUpQuestParams
+		RequiresInitCommand *string
+		AppName             string
+		S3Key               string
+	}{
+		SpinUpQuestParams:   params,
+		RequiresInitCommand: requiresInitCommand,
+		AppName:             fmt.Sprintf("%s-%s", params.Language, params.LabID),
+		S3Key:               fmt.Sprintf("quests/%s/%s", params.ProjectSlug, params.LabID),
+	}
+
+	var processedYaml bytes.Buffer
+	tmpl, err := template.ParseFiles(yamlFilePath)
+	if err != nil {
+		log.Printf("Error parsing quest deployment template file '%s': %v", yamlFilePath, err)
+		return fmt.Errorf("error parsing quest template file %s: %w", yamlFilePath, err)
+	}
+	if err := tmpl.Execute(&processedYaml, questDeploymentParams); err != nil {
+		log.Printf("Error executing quest deployment template for LabID '%s': %v", params.LabID, err)
+		return fmt.Errorf("error executing quest template: %w", err)
+	}
+
+	log.Printf("DEBUG: Processed quest deployment YAML for LabID '%s':\n%s", params.LabID, processedYaml.String())
+
+	var deployment appsv1.Deployment
+	if err := yaml.Unmarshal(processedYaml.Bytes(), &deployment); err != nil {
+		log.Printf("Error unmarshalling quest deployment YAML for LabID '%s': %v", params.LabID, err)
+		return fmt.Errorf("error unmarshalling quest deployment YAML: %w", err)
+	}
+
+	log.Printf("Creating quest deployment '%s'", deployment.Name)
+	_, err = ClientSet.AppsV1().Deployments(params.Namespace).Create(context.TODO(), &deployment, metav1.CreateOptions{})
+	if err != nil {
+		log.Printf("Error creating quest deployment '%s': %v", deployment.Name, err)
+		return fmt.Errorf("error creating quest deployment: %w", err)
+	}
+
+	// Update progress for quest deployment creation
+	progress := utils.LabProgressEntry{
+		Timestamp:   time.Now().Unix(),
+		Status:      utils.Booting,
+		Message:     fmt.Sprintf("Quest deployment '%s' created successfully", deployment.Name),
 		ServiceName: utils.SERVER_SERVICE,
 	}
 	utils.RedisUtilsInstance.UpdateLabInstanceProgress(params.LabID, progress)
