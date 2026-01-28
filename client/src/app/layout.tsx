@@ -20,19 +20,49 @@ const poppins = Poppins({
 });
 
 export const metadata: Metadata = {
+  metadataBase: new URL("https://devsarena.in"),
+  
   title: {
     default: "DevsArena — Build Complex Software One Checkpoint at a Time",
     template: "%s — DevsArena",
   },
+  
   description:
     "Guided, test-driven projects with instant cloud sandboxes. Write code, fix failing builds, and prove it works — one checkpoint at a time.",
+  
+  keywords: [
+    "Cloud Native",
+    "Project Based Learning",
+    "Guided Projects",
+    "Secure Sandboxes",
+    "Playgrounds",
+    "Build Complex Software",
+    "One Checkpoint at a Time",
+    "Instant Cloud Sandboxes",
+    "Cloud Sandboxes",
+    "Kubernetes",
+    "Golang",
+    "React",
+    "Software Engineering",
+    "Next.js",
+  ],
+
+  authors: [{ name: "Krishna Chaitanya Kommera", url: "https://twitter.com/KrishnaWyvern" }],
+  creator: "Krishna Chaitanya Kommera",
+  applicationName: "DevsArena",
+
   icons: {
     icon: "/logos/white.svg",
     shortcut: "/logos/white.svg",
-    apple: "/logos/white.svg",
+
+    apple: [
+      { url: "/logos/white.svg", type: "image/svg+xml" },
+      { url: "/apple-icon.png", sizes: "180x180", type: "image/png" }, 
+    ],
   },
-  metadataBase: new URL("https://devsarena.in"),
+
   alternates: { canonical: "/" },
+
   openGraph: {
     title: "DevsArena — Guided Projects & Instant Sandboxes",
     description:
@@ -40,19 +70,26 @@ export const metadata: Metadata = {
     url: "https://devsarena.in/",
     siteName: "DevsArena",
     images: [
-      { url: "/logos/white.svg", width: 1200, height: 630, alt: "DevsArena" },
+      { 
+        url: "/og-image.png", 
+        width: 1200, 
+        height: 630, 
+        alt: "DevsArena Platform Preview" 
+      },
     ],
     locale: "en_US",
     type: "website",
   },
+
   twitter: {
     card: "summary_large_image",
     title: "DevsArena — Build Complex Software One Checkpoint at a Time",
     description:
       "Guided, test-driven projects with instant cloud sandboxes.",
-    images: ["/logos/white.svg"],
+    images: ["/og-image.png"],
     creator: "@KrishnaWyvern",
   },
+
   robots: {
     index: true,
     follow: true,
@@ -78,26 +115,50 @@ export default function RootLayout({
 }: Readonly<{
   children: React.ReactNode;
 }>) {
+  const jsonLd = {
+    "@context": "https://schema.org",
+    "@graph": [
+      {
+        "@type": "WebSite",
+        "name": "DevsArena",
+        "url": "https://devsarena.in/",
+        "potentialAction": {
+          "@type": "SearchAction",
+          "target": "https://devsarena.in/?q={search_term_string}",
+          "query-input": "required name=search_term_string",
+        },
+      },
+      {
+        "@type": "Organization",
+        "name": "DevsArena",
+        "url": "https://devsarena.in",
+        "logo": "https://devsarena.in/logos/white.svg",
+        "sameAs": [
+          "https://twitter.com/KrishnaWyvern",
+          "https://github.com/KrishnaChaitanya45", // Update this if your GitHub username is different!
+        ],
+      },
+      {
+        "@type": "SoftwareApplication",
+        "name": "DevsArena",
+        "applicationCategory": "EducationalApplication",
+        "operatingSystem": "Cloud",
+        "offers": {
+          "@type": "Offer",
+          "price": "0",
+          "priceCurrency": "USD",
+        },
+      }
+    ],
+  };
+
   return (
     <html lang="en" className="dark">
       <head>
         <link rel="icon" type="image/svg" href="/logos/white.svg" />
-        {/* Basic JSON-LD for organization/website */}
         <script
           type="application/ld+json"
-          dangerouslySetInnerHTML={{
-            __html: JSON.stringify({
-              "@context": "https://schema.org",
-              "@type": "WebSite",
-              name: "DevsArena",
-              url: "https://devsarena.in/",
-              potentialAction: {
-                "@type": "SearchAction",
-                target: "https://devsarena.in/?q={search_term_string}",
-                "query-input": "required name=search_term_string",
-              },
-            }),
-          }}
+          dangerouslySetInnerHTML={{ __html: JSON.stringify(jsonLd) }}
         />
       </head>
       <body
